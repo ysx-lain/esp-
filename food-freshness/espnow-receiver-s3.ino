@@ -3,30 +3,14 @@
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时在串口打印接收的数据（多行人类可读格式）
- * - 支持串口命令转发（set interval, skip warmup, status）
+ * - 支持串口命令转发（set interval, skip warmup, status, update model）
  * - 连接状态检测（带防抖）
- * - 制冷片控制（可配置S3直驱 / UART发给ESP32-P4）
- * - 预留AI推理接口
+ * - 支持SD卡模型OTA升级，第二核心后台处理，ESP-NOW不受影响
  */
 
 #include <esp_now.h>
 #include <WiFi.h>
-#include <driver/ledc.h>
-
-// ==================== 配置选项 ====================
-#define ENABLE_P4_CONTROL 0    // 0=S3直接PWM控制制冷片, 1=UART发给ESP32-P4
-
-// ==================== 引脚定义（根据你的硬件修改）====================
-// 制冷片PWM（S3直驱模式）
-#define COOLER_PWM_PIN   GPIO_NUM_8
-#define COOLER_PWM_FREQ  1000
-#define COOLER_PWM_CH    LEDC_CHANNEL_0
-
-// P4 UART（P4控制模式）
-#define P4_UART          UART_NUM_2
-#define P4_UART_TX       GPIO_NUM_17
-#define P4_UART_RX       GPIO_NUM_18
-#define P4_BAUD_RATE     115200
+#include "model_manager.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -62,34 +46,19 @@ typedef struct __attribute__((packed)) {
   uint32_t timestamp;
 } CommandPacket;
 
-// 给P4的控制帧
-typedef struct __attribute__((packed)) {
-  uint8_t magic[2];
-  uint8_t cmd;        // 0=关, 1=开, 2=设置功率
-  uint8_t power;      // 0-100%
-  uint8_t checksum;
-} P4CoolerCmd;
-
-// 推理结果
-typedef struct {
-  uint8_t item_id;         // 物品种类ID
-  uint8_t freshness_level; // 0-差, 1-一般, 2-新鲜
-  float confidence;        // 置信度
-} InferenceResult;
-
 // ==================== 配置 ====================
 // 发送端 MAC 地址（必须与发送端代码中的 receiverMac 一致）
 uint8_t sensorMac[] = {0x90, 0xE5, 0xB1, 0xCC, 0x3C, 0x78}; // 请修改为您的发送端 MAC
 const unsigned long CONNECTION_TIMEOUT = 45000;
 const unsigned long STARTUP_GRACE = 120000;
 const int OFFLINE_CONFIRM_COUNT = 2;
-const unsigned long DATA_PRINT_INTERVAL = 5000; // 打印间隔，避免刷屏
+
+// SD卡模型升级配置
+#define SD_CS_PIN 5  // 根据你的硬件修改CS引脚
 
 unsigned long startTime = 0;
 SensorData latestData;
 bool hasValidSensorData = false;
-unsigned long lastDataPrintTime = 0;
-InferenceResult lastInference;
 
 // 连接监控
 struct PeerMonitor {
@@ -101,6 +70,9 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
+// 模型管理
+ModelManager *modelMgr = nullptr;
+
 // ==================== 函数声明 ====================
 void addPeer(const uint8_t *mac, const char *name);
 void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len);
@@ -109,94 +81,33 @@ void sendCommand(const char* cmd);
 void printSensorData();
 void printWarmupStatus(const WarmupStatus &w);
 String getStatusString(uint8_t status);
-void coolerInit();
-void setCoolerPower(uint8_t percent);
-bool runInference(const SensorData &sensor, InferenceResult &result);
-
-// ==================== PWM / UART 初始化 ====================
-#if !ENABLE_P4_CONTROL
-static void pwm_cooler_init() {
-  ledc_timer_config_t cfg = {
-    .speed_mode = LEDC_HIGH_SPEED_MODE,
-    .duty_resolution = LEDC_TIMER_8_BIT,
-    .timer_num = LEDC_TIMER_0,
-    .freq_hz = COOLER_PWM_FREQ,
-    .clk_cfg = LEDC_AUTO_CLK
-  };
-  ledc_timer_config(&cfg);
-
-  ledc_channel_config_t ch_cfg = {
-    .gpio_num = COOLER_PWM_PIN,
-    .speed_mode = LEDC_HIGH_SPEED_MODE,
-    .channel = COOLER_PWM_CH,
-    .timer_sel = LEDC_TIMER_0,
-    .duty = 0,
-    .hpoint = 0
-  };
-  ledc_channel_config(&ch_cfg);
-}
-
-void set_cooler_pwm(uint8_t percent) {
-  uint32_t duty = (percent * 255UL) / 100UL;
-  ledc_set_duty(LEDC_HIGH_SPEED_MODE, COOLER_PWM_CH, duty);
-  ledc_update_duty(LEDC_HIGH_SPEED_MODE, COOLER_PWM_CH);
-}
-#else
-static void p4_uart_init() {
-  uart_config_t uart_config = {
-    .baud_rate = P4_BAUD_RATE,
-    .data_bits = UART_DATA_8_BITS,
-    .parity = UART_PARITY_DISABLE,
-    .stop_bits = UART_STOP_BITS_1,
-    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-  };
-  uart_param_config(P4_UART, &uart_config);
-  uart_set_pin(P4_UART, P4_UART_TX, P4_UART_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-  uart_driver_install(P4_UART, 256, 0, 0, NULL, 0);
-}
-
-void send_cooler_to_p4(uint8_t cmd, uint8_t power) {
-  P4CoolerCmd frame;
-  frame.magic[0] = 0x55;
-  frame.magic[1] = 0xAA;
-  frame.cmd = cmd;
-  frame.power = power;
-  frame.checksum = frame.magic[0] ^ frame.magic[1] ^ frame.cmd ^ frame.power;
-  uart_write_bytes(P4_UART, (const char*)&frame, sizeof(frame));
-}
-#endif
-
-void coolerInit() {
-#if ENABLE_P4_CONTROL
-  p4_uart_init();
-  send_cooler_to_p4(0, 0); // 初始关闭
-#else
-  pwm_cooler_init();
-  set_cooler_pwm(0); // 初始关闭
-#endif
-}
-
-void setCoolerPower(uint8_t percent) {
-#if ENABLE_P4_CONTROL
-  if (percent == 0) {
-    send_cooler_to_p4(0, 0);
-  } else {
-    send_cooler_to_p4(1, percent);
-  }
-#else
-  set_cooler_pwm(percent);
-#endif
-}
+void modelUpgradeTask(void *arg);
 
 // ==================== setup ====================
 void setup() {
   Serial.begin(115200);
   while (!Serial) delay(10);
-  Serial.println("\n===== ESP-NOW 接收端 - 智能食材监测 =====");
-  Serial.println("可用命令: set interval <秒>, skip warmup, status, cooler <0-100>");
-
+  Serial.println("\n===== ESP-NOW 接收端 - 智能食材新鲜度监测 =====");
+  Serial.println("可用命令: set interval <秒>, skip warmup, status, update model");
   startTime = millis();
-  coolerInit();
+
+  // 初始化SD卡模型管理
+  modelMgr = new ModelManager(SD_CS_PIN);
+  if (!modelMgr->begin()) {
+    Serial.printf("⚠️ SD卡模型管理初始化失败: %s\n", modelMgr->getLastError());
+    Serial.println("可以继续使用内置模型，无法OTA升级");
+  } else {
+    Serial.println("✅ SD卡模型管理初始化完成");
+    if (modelMgr->hasModel()) {
+      Serial.println("📦 SD卡上找到模型文件，启动后加载");
+    } else {
+      Serial.println("⚠️ SD卡上没有找到模型，使用内置模型");
+      Serial.println("发送 'update model' 开始串口升级模型");
+    }
+    // 启动第二核心处理模型升级，ESP-NOW在Core 0运行互不干扰
+    xTaskCreatePinnedToCore(modelUpgradeTask, "modelUpgrade", 8192, NULL, 1, NULL, 1);
+    Serial.println("✅ 模型升级任务已在Core 1启动，ESP-NOW不受影响");
+  }
 
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {
@@ -214,78 +125,46 @@ void setup() {
     Serial.println("添加发送端失败");
   }
 
+  // 添加监控设备
   addPeer(sensorMac, "气体发送端");
 
   Serial.print("本机 MAC: ");
   Serial.println(WiFi.macAddress());
-  Serial.println("配置：");
-#if ENABLE_P4_CONTROL
-  Serial.println("→ 制冷片控制：ESP32-P4（UART）");
-#else
-  Serial.println("→ 制冷片控制：S3 直接PWM");
-#endif
   Serial.println("等待数据...");
+}
+
+// ==================== 模型升级任务（运行在Core 1） ====================
+void modelUpgradeTask(void *arg) {
+  while (true) {
+    if (Serial.available() > 0) {
+      String cmd = Serial.readStringUntil('\n');
+      cmd.trim();
+      if (cmd.equalsIgnoreCase("update model")) {
+        // 开始接收新模型
+        if (!modelMgr) {
+          Serial.println("❌ 模型管理未初始化");
+          continue;
+        }
+        bool ok = modelMgr->receiveAndSaveModel(Serial);
+        if (ok) {
+          Serial.println("✅ 模型接收保存成功！重启后加载新模型");
+        } else {
+          Serial.printf("❌ 模型接收失败: %s\n", modelMgr->getLastError());
+        }
+      } else if (cmd.length() > 0) {
+        // 其他命令转发给发送端（ESP-NOW）
+        sendCommand(cmd.c_str());
+      }
+    }
+    delay(10);
+  }
 }
 
 // ==================== loop ====================
 void loop() {
   checkAllConnections();
 
-  // 处理本地串口命令（转发到发送端）
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    if (cmd.length() > 0) {
-      // 本地命令处理
-      if (cmd.startsWith("cooler ")) {
-        int p = cmd.substring(7).toInt();
-        p = constrain(p, 0, 100);
-        setCoolerPower(p);
-        Serial.printf("制冷片功率：%d%%\n", p);
-      } else {
-        // 其他命令转发给发送端
-        sendCommand(cmd.c_str());
-      }
-    }
-  }
-
-  // 当有新数据时，运行AI推理
-  static unsigned long lastInferTime = 0;
-  unsigned long now = millis();
-  if (hasValidSensorData && (now - lastInferTime) > 1000) {
-    lastInferTime = now;
-
-    if (runInference(latestData, lastInference)) {
-      // 根据推理结果自动控制制冷
-      // 示例：不新鲜 → 开启制冷保鲜
-      if (lastInference.freshness_level == 0) {
-        setCoolerPower(80); // 80%功率
-      } else if (lastInference.freshness_level == 1) {
-        setCoolerPower(40); // 中等功率
-      } else {
-        setCoolerPower(0);  // 关闭
-      }
-
-      // 打印推理结果
-      Serial.println("\n========== AI推理结果 ==========");
-      Serial.printf("物品ID: %d\n", lastInference.item_id);
-      Serial.printf("新鲜度: %d级\n", lastInference.freshness_level);
-      Serial.printf("置信度: %.2f\n", lastInference.confidence);
-      Serial.println("================================");
-    }
-  }
-
-  // 定期打印数据，避免刷屏
-  if (hasValidSensorData && (now - lastDataPrintTime > DATA_PRINT_INTERVAL)) {
-    lastDataPrintTime = now;
-    printSensorData();
-  }
-
-  if (!hasValidSensorData && (now - lastDataPrintTime > 30000)) {
-    lastDataPrintTime = now;
-    Serial.println("[提醒] 尚未收到传感器数据");
-  }
-
+  // 主循环（Core 0）只处理ESP-NOW，模型升级在Core 1
   delay(100);
 }
 
@@ -320,6 +199,15 @@ void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int
     if (tmp.dataType == PKT_TYPE_SENSOR) {
       latestData = tmp;
       hasValidSensorData = true;
+      Serial.println("\n========== 接收到传感器数据 ==========");
+      Serial.print("发送方 MAC: ");
+      for (int i = 0; i < 6; i++) {
+        Serial.printf("%02X", info->src_addr[i]);
+        if (i < 5) Serial.print(":");
+      }
+      Serial.println();
+      printSensorData();
+      Serial.println("======================================\n");
     }
   }
   else if (len == sizeof(WarmupStatus)) {
@@ -371,13 +259,18 @@ void checkAllConnections() {
       offlineCnt[i] = 0;
       Serial.printf("\n[连接] %s 已恢复在线。\n", peers[i].name);
       peers[i].wasConnected = true;
+    } else if (online) {
+      offlineCnt[i] = 0;
     }
+  }
+
+  if (!hasValidSensorData && (now - lastCheck > 30000)) {
+    Serial.println("[提醒] 尚未收到传感器数据");
   }
 }
 
 // ==================== 打印函数 ====================
 void printSensorData() {
-  Serial.println("\n========== 传感器数据 ==========");
   Serial.printf("发送端时间戳: %u ms\n", latestData.timestamp);
   Serial.printf("传感器状态: %s\n", getStatusString(latestData.sensor_status).c_str());
   Serial.printf("Odor: %.2f ppm\n", latestData.odor_ppm);
@@ -388,7 +281,6 @@ void printSensorData() {
   Serial.printf("CO2温度: %d °C\n", latestData.co2_temp);
   Serial.printf("环境温度: %.2f °C\n", latestData.env_temp);
   Serial.printf("湿度: %.2f %%\n", latestData.humidity);
-  Serial.println("================================");
 }
 
 void printWarmupStatus(const WarmupStatus &w) {
@@ -405,20 +297,4 @@ String getStatusString(uint8_t status) {
   if (status & STATUS_BME680_OK) s += "BME680 ";
   if (s.length() == 0) s = "None";
   return s;
-}
-
-// ==================== AI推理占位（替换为你的模型推理）====================
-bool runInference(const SensorData &sensor, InferenceResult &result) {
-  // 这里填入你的 TFLite 模型推理代码
-  // 示例：
-  // float input[8] = {sensor.odor_ppm, sensor.hcho_ppm, sensor.co_ppm, sensor.voc_ppm,
-  //                   sensor.co2_ppm, (float)sensor.co2_temp, sensor.env_temp, sensor.humidity};
-  // 模型推理 → 填充 result
-  // 返回 true 表示推理成功
-
-  // 占位返回，实际项目请删除替换
-  result.item_id = 1;
-  result.freshness_level = 2;
-  result.confidence = 0.92f;
-  return true;
 }
