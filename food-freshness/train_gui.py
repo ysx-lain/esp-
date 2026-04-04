@@ -100,14 +100,14 @@ class TrainGUI:
 
         ttk.Label(frame, text="采集频率(秒):").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=1, to=60, textvariable=self.sample_interval, width=8).grid(row=3, column=1, sticky=tk.W)
-        ttk.Button(frame, text="同步频率", command=self.sync_sample_interval).grid(row=3, column=2, padx=5);
+        tk.Button(frame, text="同步频率", command=self.sync_sample_interval).grid(row=3, column=2, padx=5);
 
-        self.start_log_btn = ttk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED)
+        self.start_log_btn = tk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED)
         self.start_log_btn.grid(row=4, column=0, columnspan=2, pady=5)
-        self.stop_log_btn = ttk.Button(frame, text="停止采集", command=self.stop_logging, state=tk.DISABLED)
+        self.stop_log_btn = tk.Button(frame, text="停止采集", command=self.stop_logging, state=tk.DISABLED)
         self.stop_log_btn.grid(row=4, column=2, pady=5)
 
-        self.status_label = ttk.Label(frame, text="状态: 未连接", foreground="gray")
+        self.status_label = tk.Label(frame, text="状态: 未连接", foreground="gray")
         self.status_label.grid(row=5, column=0, columnspan=3, pady=2)
 
         # 训练参数
@@ -163,7 +163,7 @@ class TrainGUI:
         notebook.add(cm_frame, text="混淆矩阵")
         self.cm_figure = Figure(figsize=(8, 4), dpi=100)
         self.cm_canvas = FigureCanvasTkAgg(self.cm_figure, master=cm_frame)
-        self.cm_canvas.get_tk_widget().pack(fill=tk.Both, expand=True)
+        self.cm_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     # ------------------ 串口和采集 ------------------
     def update_com_ports(self):
@@ -275,7 +275,7 @@ class TrainGUI:
             self.csv_file.close()
             self.csv_file = None
             self.csv_writer = None
-        self.start_log_btn.config(state=tk.Normal)
+        self.start_log_btn.config(state=tk.NORMAL)
         self.stop_log_btn.config(state=tk.DISABLED)
         self.update_status("已停止", "gray")
         self.log("采集已停止", "success")
@@ -580,5 +580,5 @@ if __name__ == "__main__":
     import csv
     root = tk.Tk()
     app = TrainGUI(root)
-    root.protocol("WM_DELETE_WINDOW", app.stop_logging)
+    root.protocol("WM_DELETE_WINDOW", root.quit)
     root.mainloop()
