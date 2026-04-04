@@ -70,12 +70,12 @@ class TrainGUI:
 
     def create_widgets(self):
         # 左侧面板 - 设置
-        left = tk.Frame(self.root, padding=10, width=350)
+        left = tk.Frame(self.root, width=350, padx=10, pady=10)
         left.pack(side=tk.LEFT, fill=tk.Y)
         left.pack_propagate(False)
 
         # 串口设置
-        frame = tk.LabelFrame(left, text="串口连接", padding=5)
+        frame = tk.LabelFrame(left, text="串口连接", padx=5, pady=5)
         frame.pack(fill=tk.X, pady=(0,10))
 
         ttk.Label(frame, text="串口号:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
@@ -92,7 +92,7 @@ class TrainGUI:
         self.connect_btn.grid(row=2, column=0, columnspan=2, pady=5)
 
         # 数据采集
-        frame = tk.LabelFrame(left, text="数据采集", padding=5)
+        frame = tk.LabelFrame(left, text="数据采集", padx=5, pady=5)
         frame.pack(fill=tk.X, pady=(0,10))
 
         ttk.Label(frame, text="保存目录:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
@@ -125,7 +125,7 @@ class TrainGUI:
         self.timer_label.grid(row=7, column=0, columnspan=3, pady=2)
 
         # 训练参数
-        frame = tk.LabelFrame(left, text="训练参数", padding=5)
+        frame = tk.LabelFrame(left, text="训练参数", padx=5, pady=5)
         frame.pack(fill=tk.X, pady=(0,10))
 
         ttk.Label(frame, text="滑动窗口大小:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
@@ -153,7 +153,7 @@ class TrainGUI:
         self.train_btn.grid(row=7, column=0, columnspan=3, pady=10)
 
         # 右侧面板 - 输出和图表
-        right = tk.Frame(self.root, padding=10)
+        right = tk.Frame(self.root, padx=10, pady=10)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         notebook = ttk.Notebook(right)
