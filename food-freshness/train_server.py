@@ -38,7 +38,10 @@ g_state = {
     "data_dir": "sensor_data",
     "training": False,
     "last_result": None,
-    "log": []
+    "log": [],
+    "timer_seconds": 0,
+    "timer_start_time": 0,
+    "auto_stop_timer": None
 }
 
 def add_log(msg):
@@ -143,26 +146,54 @@ def parse_block(lines):
     except:
         return None
 
+def check_auto_stop():
+    """自动停止定时器"""
+    while g_state["is_logging"] and g_state["timer_seconds"] > 0:
+        elapsed = int(time.time() - g_state["timer_start_time"])
+        remaining = g_state["timer_seconds"] - elapsed
+        if remaining <= 0:
+            add_log(f"⏰ 定时采集到时间，自动停止")
+            g_state["is_logging"] = False
+            if g_state["csv_file"]:
+                g_state["csv_file"].close()
+                g_state["csv_file"] = None
+                g_state["csv_writer"] = None
+            break
+        time.sleep(1)
+    if g_state["csv_file"]:
+        try:
+            g_state["csv_file"].close()
+        except:
+            pass
+        g_state["csv_file"] = None
+        g_state["csv_writer"] = None
+
 def logging_worker():
     block_lines = []
     inside_block = False
+    first_block = True
     while g_state["is_logging"] and g_state["ser"] and g_state["ser"].is_open:
         try:
             raw = g_state["ser"].readline().decode('utf-8', errors='ignore').rstrip('\r\n')
             if not raw:
                 continue
-            add_log(f"RAW: {raw}")
+            add_log(f"📟 RAW: {raw}")
 
             if raw.startswith("========== 接收到传感器数据 =========="):
                 block_lines = []
                 inside_block = True
+                if first_block:
+                    add_log("✅ 收到第一组数据，开始计时")
+                    g_state["timer_start_time"] = time.time()
+                    first_block = False
                 continue
             elif raw.startswith("======================================") and inside_block:
                 record = parse_block(block_lines)
                 if record and g_state["csv_writer"]:
                     g_state["csv_writer"].writerow(record)
                     g_state["csv_file"].flush()
-                    add_log(f"记录样本: {record}")
+                    if record:
+                        add_log(f"记录样本: Odor={record[1]} HCHO={record[2]} CO={record[3]} VOC={record[4]} CO2={record[5]}")
                 inside_block = False
                 block_lines = []
                 continue
@@ -207,12 +238,16 @@ def index():
         .status-connected { background: #e8f5e9; }
         .status-logging { background: #fff3e0; }
         .status-training { background: #e3f2fd; }
+        #timer { font-weight: bold; font-size: 18px; color: #d32f2f; text-align: center; }
     </style>
 </head>
 <body>
     <h1>🥦 食材新鲜度检测 - Web训练工具</h1>
     
     <div id="status" class="status-disconnected">状态: 未连接</div>
+    <div class="row" style="justify-content: center;">
+        <div id="timer" style="display: none;">剩余时间: --:--</div>
+    </div>
 
     <div class="card">
         <h3>串口连接</h3>
@@ -249,6 +284,10 @@ def index():
                 <label>采集频率 (秒)</label>
                 <input id="interval" type="number" min="1" max="60" value="5">
             </div>
+            <div class="col">
+                <label>自动停止 (分钟, 0=不停止)</label>
+                <input id="auto_stop_minutes" type="number" min="0" max="120" value="10">
+            </div>
             <div class="col" style="flex: 0 0 120px; margin-top: 23px;">
                 <button id="btn-sync-interval">同步频率</button>
             </div>
@@ -259,6 +298,11 @@ def index():
             </div>
             <div class="col" style="flex: 0 0 150px; margin-top: 8px;">
                 <button id="btn-stop-log" class="danger">停止采集</button>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col">
+                <p><b>说明:</b> 每个标签单独保存一个CSV文件，放在sensor_data/目录下</p>
             </div>
         </div>
     </div>
@@ -325,8 +369,28 @@ def index():
         let state = {
             connected: false,
             logging: false,
-            training: false
+            training: false,
+            timer_seconds: 0,
+            timer_interval: null
         };
+
+        function formatTime(seconds) {
+            let m = Math.floor(seconds / 60);
+            let s = seconds % 60;
+            return String(m).padStart(2, '0') + ":" + String(s).padStart(2, '0');
+        }
+
+        function updateTimerDisplay() {
+            if (!state.logging || state.timer_seconds <= 0) {
+                document.getElementById('timer').style.display = 'none';
+                return;
+            }
+            document.getElementById('timer').style.display = 'block';
+            let elapsed = Math.floor(Date.now() / 1000 - (window.timerStartTime || 0));
+            let remaining = state.timer_seconds - elapsed;
+            if (remaining < 0) remaining = 0;
+            document.getElementById('timer').textContent = "剩余时间: " + formatTime(remaining);
+        }
 
         function updateStatus() {
             let statusEl = document.getElementById('status');
@@ -347,6 +411,7 @@ def index():
             document.getElementById('btn-stop-log').disabled = !state.logging;
             document.getElementById('btn-start-train').disabled = state.logging || state.training;
             document.getElementById('btn-connect').disabled = state.connected;
+            updateTimerDisplay();
         }
 
         async function refreshPorts() {
@@ -395,6 +460,7 @@ def index():
 
         async function startLog() {
             let label = document.getElementById('label').value.trim();
+            let autoMinutes = parseFloat(document.getElementById('auto_stop_minutes').value || 0);
             if (!label) {
                 alert('请填写标签');
                 return;
@@ -402,11 +468,20 @@ def index():
             let res = await fetch('/api/start_log', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({label, data_dir: 'sensor_data'})
+                body: JSON.stringify({
+                    label,
+                    data_dir: 'sensor_data',
+                    auto_stop_minutes: autoMinutes
+                })
             });
             let data = await res.json();
             if (data.success) {
                 state.logging = true;
+                state.timer_seconds = autoMinutes > 0 ? autoMinutes * 60 : 0;
+                window.timerStartTime = Date.now() / 1000;
+                if (state.timer_seconds > 0) {
+                    state.timer_interval = setInterval(updateTimerDisplay, 1000);
+                }
             } else {
                 alert('开始失败: ' + data.error);
             }
@@ -415,9 +490,14 @@ def index():
         }
 
         async function stopLog() {
+            if (state.timer_interval) {
+                clearInterval(state.timer_interval);
+                state.timer_interval = null;
+            }
             let res = await fetch('/api/stop_log', {method: 'POST'});
             let data = await res.json();
             state.logging = false;
+            state.timer_seconds = 0;
             updateStatus();
             refreshLog();
         }
@@ -504,6 +584,9 @@ def index():
                     updateStatus();
                 });
             }
+            if (state.logging) {
+                updateTimerDisplay();
+            }
         }, 2000);
     </script>
 </body>
@@ -547,6 +630,7 @@ def api_start_log():
     data = request.get_json()
     label = data['label']
     data_dir = data.get('data_dir', 'sensor_data')
+    auto_stop_minutes = float(data.get('auto_stop_minutes', 0))
     g_state["data_dir"] = data_dir
     if not g_state["ser"] or not g_state["ser"].is_open:
         add_log("❌ 串口未连接")
@@ -571,16 +655,26 @@ def api_start_log():
     
     g_state["current_label"] = label
     g_state["is_logging"] = True
+    g_state["timer_seconds"] = int(auto_stop_minutes * 60) if auto_stop_minutes > 0 else 0
+    g_state["timer_start_time"] = time.time()
     g_state["logging_thread"] = threading.Thread(target=logging_worker, daemon=True)
     g_state["logging_thread"].start()
-    add_log(f"✅ 开始采集，标签: {label}, 文件: {filename}")
+    # 启动自动停止线程
+    if auto_stop_minutes > 0:
+        g_state["auto_stop_timer"] = threading.Thread(target=check_auto_stop, daemon=True)
+        g_state["auto_stop_timer"].start()
+        add_log(f"⏰ 自动停止设置: {auto_stop_minutes} 分钟，第一组数据到达后开始计时")
+    add_log(f"✅ 开始采集，标签: {label}, 文件: {filename}（每个标签单独CSV）")
     return jsonify({"success": True})
 
 @app.route('/api/stop_log', methods=['POST'])
 def api_stop_log():
     g_state["is_logging"] = False
     if g_state["csv_file"]:
-        g_state["csv_file"].close()
+        try:
+            g_state["csv_file"].close()
+        except:
+            pass
         g_state["csv_file"] = None
         g_state["csv_writer"] = None
     add_log("✅ 采集已停止")
@@ -619,7 +713,7 @@ def training_worker(params):
             g_state["training"] = False
             return
         
-        # 加载所有CSV
+        # 加载所有CSV（多个标签分文件存储，这里合并训练）
         all_dfs = []
         for f in csv_files:
             add_log(f"  加载 {os.path.basename(f)}")
