@@ -77,10 +77,8 @@ class TrainGUI:
         self.create_widgets()
         self.update_com_ports()
         # 移除自动定时刷新串口 → 彻底解决爆发式采集问题
-        # self.root.after(2000, self.periodic_refresh)
-
-        # 监听采集间隔变化
-        self.sample_interval.trace_add('write', self.on_sample_interval_changed)
+        # 移除实时监听频率变化 → 避免频繁发送命令导致爆发读取
+        # 只有开始采集时才发送一次频率命令
 
     def create_widgets(self):
         # 左侧面板 - 设置
@@ -119,7 +117,7 @@ class TrainGUI:
 
         ttk.Label(frame, text="采集频率(秒):").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=2, to=60, textvariable=self.sample_interval, width=8).grid(row=3, column=1, sticky=tk.W)
-        tk.Button(frame, text="同步频率", command=self.sync_interval, bg="#2196F3", fg="white").grid(row=3, column=2, padx=5);
+        ttk.Label(frame, text="开始采集时自动同步").grid(row=3, column=2, padx=5);
 
         ttk.Label(frame, text="自动停止(分钟):").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=0, to=120, textvariable=self.auto_stop_minutes_var, width=8).grid(row=4, column=1, sticky=tk.W)
@@ -235,12 +233,7 @@ class TrainGUI:
         else:
             self.log(f"未在采集中，间隔同步命令暂不发送: {cmd}", "info")
 
-    def on_sample_interval_changed(self, *args):
-        if not self.is_logging:
-            return
-        if self.interval_change_timer:
-            self.root.after_cancel(self.interval_change_timer)
-        self.interval_change_timer = self.root.after(1000, self.sync_interval)
+
 
     def connect_serial(self):
         port = self.port_combo.get()
@@ -254,8 +247,7 @@ class TrainGUI:
             self.start_log_btn.config(state=tk.NORMAL)
             self.update_status("已连接", "green")
             self.log(f"成功连接 {port} @ {baud} baud", "success")
-            # 同步初始采集频率
-            self.sync_interval()
+            self.log("采集频率将在点击开始采集时自动同步，避免频繁发送", "info")
         except Exception as e:
             messagebox.showerror("错误", f"连接失败: {str(e)}")
             self.log(f"连接失败: {str(e)}", "error")
@@ -335,6 +327,15 @@ class TrainGUI:
             messagebox.showerror("错误", f"创建文件失败: {str(e)}")
             return
         
+        # 开始采集时，只发送一次频率命令，避免频繁发送导致爆发读取
+        interval = self.sample_interval.get()
+        if interval < 2:
+            interval = 2
+            self.sample_interval.set(interval)
+        cmd = f"set interval {interval}"
+        self.send_command_to_sensor(cmd)
+        self.log(f"同步采集频率: {interval} 秒 → {cmd}", "success")
+
         self.is_logging = True
         self.first_block_received = False
         self.block_lines = []
