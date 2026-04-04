@@ -149,6 +149,8 @@ def parse_block(lines):
 def check_auto_stop():
     """自动停止定时器"""
     while g_state["is_logging"] and g_state["timer_seconds"] > 0:
+        if not g_state["is_logging"]:
+            break  # 已经手动停止，直接退出
         elapsed = int(time.time() - g_state["timer_start_time"])
         remaining = g_state["timer_seconds"] - elapsed
         if remaining <= 0:
@@ -160,7 +162,7 @@ def check_auto_stop():
                 g_state["csv_writer"] = None
             break
         time.sleep(1)
-    if g_state["csv_file"]:
+    if g_state["is_logging"] and g_state["csv_file"]:
         try:
             g_state["csv_file"].close()
         except:
@@ -461,6 +463,7 @@ def index():
         async function startLog() {
             let label = document.getElementById('label').value.trim();
             let autoMinutes = parseFloat(document.getElementById('auto_stop_minutes').value || 0);
+            let interval = parseInt(document.getElementById('interval').value || 5);
             if (!label) {
                 alert('请填写标签');
                 return;
@@ -470,6 +473,7 @@ def index():
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     label,
+                    interval,
                     data_dir: 'sensor_data',
                     auto_stop_minutes: autoMinutes
                 })
@@ -631,6 +635,7 @@ def api_start_log():
     label = data['label']
     data_dir = data.get('data_dir', 'sensor_data')
     auto_stop_minutes = float(data.get('auto_stop_minutes', 0))
+    interval = int(data.get('interval', 5))
     g_state["data_dir"] = data_dir
     if not g_state["ser"] or not g_state["ser"].is_open:
         add_log("❌ 串口未连接")
@@ -639,6 +644,16 @@ def api_start_log():
         add_log("❌ 标签为空")
         return jsonify({"success": False, "error": "empty label"})
     
+    # 开始采集前清空串口输入缓冲区，避免残留旧数据一次性爆发读出
+    g_state["ser"].reset_input_buffer()
+    add_log("✅ 已清空串口输入缓冲区，避免残留旧数据")
+
+    # 开始采集时只发送一次频率命令，避免频繁发送导致爆发
+    if interval >= 2:
+        cmd = f"set interval {interval}\n"
+        g_state["ser"].write(cmd.encode())
+        add_log(f"✅ 同步采集频率: {interval} 秒 → {cmd.strip()}")
+
     os.makedirs(data_dir, exist_ok=True)
     start_str = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = os.path.join(data_dir, f'{label}_{start_str}.csv')
