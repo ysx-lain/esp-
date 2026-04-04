@@ -336,14 +336,18 @@ class TrainGUI:
         self.send_command_to_sensor(cmd)
         self.log(f"同步采集频率: {interval} 秒 → {cmd}", "success")
 
-        self.is_logging = True
-        self.first_block_received = False
+        # 开始采集前清空串口缓冲区，避免残留旧数据一次性爆发读出
+        self.ser.reset_input_buffer()
         self.block_lines = []
         self.inside_block = False
+
+        self.is_logging = True
+        self.first_block_received = False
         self.start_log_btn.config(state=tk.DISABLED)
         self.stop_log_btn.config(state=tk.NORMAL)
         self.update_status(f"采集中 - {label}", "green")
         self.log(f"开始采集，标签: {label}, 文件: {filename}（每个标签单独CSV）", "success")
+        self.log("已清空串口输入缓冲区，避免残留旧数据", "info")
         if self.auto_stop_minutes > 0:
             self.log(f"⏰ 自动停止设置: {self.auto_stop_minutes} 分钟，第一组数据到达后开始计时", "info")
         
