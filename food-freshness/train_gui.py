@@ -73,7 +73,7 @@ class TrainGUI:
 
         ttk.Label(frame, text="串口号:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
         self.port_combo = ttk.Combobox(frame, width=15)
-        self.port_combo.grid(row=0, column=1, padx=5)
+        self.port_combo.grid(row=0, column=1, padx=5, sticky=tk.W)
         ttk.Button(frame, text="刷新", command=self.update_com_ports).grid(row=0, column=2, padx=5)
 
         ttk.Label(frame, text="波特率:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
@@ -115,7 +115,7 @@ class TrainGUI:
         ttk.Spinbox(frame, from_=1, to=10, textvariable=self.window_step, width=8).grid(row=1, column=1, sticky=tk.W)
 
         ttk.Label(frame, text="训练轮数:").grid(row=2, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=10, to=300, textvariable=self.epochs, width=8).grid(row=2, column=1, sticky=k.W)
+        ttk.Spinbox(frame, from_=10, to=300, textvariable=self.epochs, width=8).grid(row=2, column=1, sticky=tk.W)
 
         ttk.Label(frame, text="批次大小:").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=8, to=128, textvariable=self.batch_size, width=8).grid(row=3, column=1, sticky=tk.W)
@@ -129,7 +129,7 @@ class TrainGUI:
         ttk.Label(frame, text="输出模型名:").grid(row=6, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Entry(frame, textvariable=self.output_name, width=15).grid(row=6, column=1, padx=5, sticky=tk.W)
 
-        self.train_btn = ttk.Button(frame, text="开始训练", command=self.start_training, bg="#4CAF50", foreground="white")
+        self.train_btn = tk.Button(frame, text="开始训练", command=self.start_training, bg="#4CAF50", fg="white")
         self.train_btn.grid(row=7, column=0, columnspan=3, pady=10)
 
         # 右侧面板 - 输出和图表
@@ -205,6 +205,9 @@ class TrainGUI:
         elif level == "success":
             tag = "✅ "
             self.log_text.tag_config("success", foreground="green")
+        elif level == "data":
+            tag = "📟 "
+            self.log_text.tag_config("data", foreground="blue")
         self.log_text.insert(tk.END, f"[{ts}] {tag}{msg}\n", level)
         self.log_text.see(tk.END)
         self.root.update_idletasks()
@@ -250,6 +253,7 @@ class TrainGUI:
         if self.csv_file:
             self.csv_file.close()
             self.csv_file = None
+            self.csv_writer = None
         self.start_log_btn.config(state=tk.NORMAL)
         self.stop_log_btn.config(state=tk.DISABLED)
         self.update_status("已停止", "gray")
@@ -369,94 +373,94 @@ class TrainGUI:
             f.write("// DO NOT EDIT - generated from training GUI\n\n")
             f.write("#include <stddef.h>\n")
             f.write("#include <stdint.h>\n\n")
-            f.write(f"const unsigned int {array_name}_size = {len(tflite_model)};\n")
-            f.write(f"const unsigned char {array_name}[] = {{\n  ")
-            bytes_per_line = 16
+            f.write(f"const unsigned int {array_name}_size = {len(tflite_model)};\n");
+            f.write(f"const unsigned char {array_name}[] = {{\n  ");
+            bytes_per_line = 16;
             for i, byte in enumerate(tflite_model):
-                f.write(f"0x{byte:02x}, ")
+                f.write(f"0x{byte:02x}, ");
                 if (i + 1) % bytes_per_line == 0:
-                    f.write("\n  ")
+                    f.write("\n  ");
             if len(tflite_model) % bytes_per_line != 0:
-                f.write("\n")
-            f.write("};\n\n")
+                f.write("\n");
+            f.write("};\n\n");
         return output_header_path
 
     def start_training(self):
         if not os.path.exists(self.data_dir.get()):
-            messagebox.showerror("错误", "数据目录不存在")
-            return
-        csv_files = glob.glob(os.path.join(self.data_dir.get(), '*.csv'))
+            messagebox.showerror("错误", "数据目录不存在");
+            return;
+        csv_files = glob.glob(os.path.join(self.data_dir.get(), '*.csv'));
         if len(csv_files) == 0:
-            messagebox.showerror("错误", "数据目录中没有找到CSV文件，请先采集数据")
-            return
+            messagebox.showerror("错误", "数据目录中没有找到CSV文件，请先采集数据");
+            return;
 
-        self.train_btn.config(state=tk.DISABLED)
-        self.log("\n" + "="*60, "info")
-        self.log("开始训练...", "info")
-        self.log(f"数据目录: {self.data_dir.get()}", "info")
-        self.log(f"找到 {len(csv_files)} 个CSV文件", "info")
+        self.train_btn.config(state=tk.DISABLED);
+        self.log("\n" + "="*60, "info");
+        self.log("开始训练...", "info");
+        self.log(f"数据目录: {self.data_dir.get()}", "info");
+        self.log(f"找到 {len(csv_files)} 个CSV文件", "info");
 
-        threading.Thread(target=self.training_thread, daemon=True).start()
+        threading.Thread(target=self.training_thread, daemon=True).start();
 
     def training_thread(self):
         try:
             # 加载所有CSV
-            all_dfs = []
+            all_dfs = [];
             for f in glob.glob(os.path.join(self.data_dir.get(), '*.csv')):
-                self.root.after(0, lambda f=f: self.log(f" 加载 {os.path.basename(f)}", "info"))
-                df = pd.read_csv(f)
-                all_dfs.append(df)
-            df = pd.concat(all_dfs, ignore_index=True)
-            self.root.after(0, lambda: self.log(f"\n总共 {len(df)} 条原始样本", "info"))
+                self.root.after(0, lambda f=f: self.log(f"  加载 {os.path.basename(f)}", "info"));
+                df = pd.read_csv(f);
+                all_dfs.append(df);
+            df = pd.concat(all_dfs, ignore_index=True);
+            self.root.after(0, lambda: self.log(f"\n总共 {len(df)} 条原始样本", "info"));
 
             # 提取特征标签
-            feature_cols = ['Odor', 'HCHO', 'CO', 'VOC', 'CO2']
-            X_raw = df[feature_cols].values
-            labels_raw = df['Label'].values
-            unique_labels = sorted(list(set(labels_raw)))
-            label_to_idx = {l:i for i,l in enumerate(unique_labels)}
-            y_raw = np.array([label_to_idx[l] for l in labels_raw])
+            feature_cols = ['Odor', 'HCHO', 'CO', 'VOC', 'CO2'];
+            X_raw = df[feature_cols].values;
+            labels_raw = df['Label'].values;
+            unique_labels = sorted(list(set(labels_raw)));
+            label_to_idx = {l:i for i,l in enumerate(unique_labels)};
+            y_raw = np.array([label_to_idx[l] for l in labels_raw]);
 
-            self.root.after(0, lambda: self.log(f"\n类别列表 ({len(unique_labels)} 类):", "info"))
+            self.root.after(0, lambda: self.log(f"\n类别列表 ({len(unique_labels)} 类):", "info"));
             for l,i in label_to_idx.items():
-                self.root.after(0, lambda l=l,i=i: self.log(f"  [{i}] {l}", "info"))
+                self.root.after(0, lambda l=l,i=i: self.log(f"  [{i}] {l}", "info"));
 
             # 滑动窗口
-            ws = self.window_size.get()
-            step = self.window_step.get()
+            ws = self.window_size.get();
+            step = self.window_step.get();
             if ws > 1:
-                X_window, y_window = self.create_sliding_windows(X_raw, y_raw, ws, step)
-                self.root.after(0, lambda: self.log(f"\n滑动窗口: 大小={ws}, 步长={step}, 生成 {X_window.shape[0]} 样本", "info"))
+                X_window, y_window = self.create_sliding_windows(X_raw, y_raw, ws, step);
+                self.root.after(0, lambda: self.log(f"\n滑动窗口: 大小={ws}, 步长={step}, 生成 {X_window.shape[0]} 样本", "info"));
             else:
-                X_window = X_raw[:, np.newaxis, :]
-                y_window = y_raw
+                X_window = X_raw[:, np.newaxis, :];
+                y_window = y_raw;
 
             # 标准化
-            n_features = X_window.shape[-1]
-            scaler = StandardScaler()
-            X_reshaped = X_window.reshape(-1, n_features)
-            X_scaled_reshaped = scaler.fit_transform(X_reshaped)
-            X = X_scaled_reshaped.reshape(X_window.shape)
+            n_features = X_window.shape[-1];
+            scaler = StandardScaler();
+            X_reshaped = X_window.reshape(-1, n_features);
+            X_scaled_reshaped = scaler.fit_transform(X_reshaped);
+            X = X_scaled_reshaped.reshape(X_window.shape);
 
             # 划分数据集
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y_window, test_size=0.2, random_state=42, stratify=y_window
-            )
-            self.root.after(0, lambda: self.log(f"\n训练集: {X_train.shape[0]} 样本", "info"))
-            self.root.after(0, lambda: self.log(f"测试集: {X_test.shape[0]} 样本", "info"))
+            );
+            self.root.after(0, lambda: self.log(f"\n训练集: {X_train.shape[0]} 样本", "info"));
+            self.root.after(0, lambda: self.log(f"测试集: {X_test.shape[0]} 样本", "info"));
 
             # 构建模型
-            num_classes = len(unique_labels)
-            model = self.build_model(X.shape[1:], num_classes, self.dropout.get())
+            num_classes = len(unique_labels);
+            model = self.build_model(X.shape[1:], num_classes, self.dropout.get());
             model.compile(
                 optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate.get()),
                 loss='sparse_categorical_crossentropy',
                 metrics=['accuracy']
-            )
+            );
 
             # 训练
-            early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
-            self.root.after(0, lambda: self.log("\n开始训练...", "info"))
+            early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True);
+            self.root.after(0, lambda: self.log("\n开始训练...", "info"));
 
             history = model.fit(
                 X_train, y_train,
@@ -465,94 +469,95 @@ class TrainGUI:
                 validation_split=0.1,
                 callbacks=[early_stop],
                 verbose=0
-            )
+            );
 
             # 评估
-            test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
-            self.root.after(0, lambda: self.log(f"\n训练完成，测试准确率: {test_acc:.4f}", "success"))
+            test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0);
+            self.root.after(0, lambda: self.log(f"\n训练完成，测试准确率: {test_acc:.4f}", "success"));
 
-            y_pred = model.predict(X_test, verbose=0)
-            y_pred_classes = np.argmax(y_pred, axis=1)
-            report = classification_report(y_test, y_pred_classes, target_names=unique_labels)
-            self.root.after(0, lambda: self.log("\n分类报告:\n" + report, "info"))
+            y_pred = model.predict(X_test, verbose=0);
+            y_pred_classes = np.argmax(y_pred, axis=1);
+            report = classification_report(y_test, y_pred_classes, target_names=unique_labels);
+            self.root.after(0, lambda: self.log("\n分类报告:\n" + report, "info"));
 
             # 绘制训练曲线
-            self.root.after(0, lambda: self.plot_training(history))
+            self.root.after(0, lambda: self.plot_training(history));
 
             # 绘制混淆矩阵
-            cm = confusion_matrix(y_test, y_pred_classes)
-            self.root.after(0, lambda: self.plot_confusion(cm, unique_labels))
+            cm = confusion_matrix(y_test, y_pred_classes);
+            self.root.after(0, lambda: self.plot_confusion(cm, unique_labels));
 
             # 导出
-            output_base = self.output_name.get()
-            tflite_path = f"{output_base}.tflite"
-            header_path = f"{output_base}.h"
+            output_base = self.output_name.get();
+            tflite_path = f"{output_base}.tflite";
+            header_path = f"{output_base}.h";
 
-            self.root.after(0, lambda: self.log(f"\n导出TFLite模型: {tflite_path}", "info"))
-            tflite_model = self.convert_to_tflite(model, tflite_path)
-            size_kb = len(tflite_model) / 1024
-            self.root.after(0, lambda: self.log(f"模型大小: {size_kb:.1f} KB", "info"))
+            self.root.after(0, lambda: self.log(f"\n导出TFLite模型: {tflite_path}", "info"));
+            tflite_model = self.convert_to_tflite(model, tflite_path);
+            size_kb = len(tflite_model) / 1024;
+            self.root.after(0, lambda: self.log(f"模型大小: {size_kb:.1f} KB", "info"));
 
-            self.root.after(0, lambda: self.log(f"导出C头文件: {header_path}", "info"))
-            self.tflite_to_c_array(list(tflite_model), header_path)
+            self.root.after(0, lambda: self.log(f"导出C头文件: {header_path}", "info"));
+            self.tflite_to_c_array(list(tflite_model), header_path);
 
             # 保存参数
             np.savez(f"{output_base}_params.npz", 
                     mean=scaler.mean_, 
                     std=np.sqrt(scaler.var_),
-                    classes=np.array(unique_labels, dtype=object))
+                    classes=np.array(unique_labels, dtype=object));
 
-            self.root.after(0, lambda: self.log(f"\n✅ 全部完成！输出文件:", "success"))
-            self.root.after(0, lambda: self.log(f"  {tflite_path} - INT8量化模型", "success"))
-            self.root.after(0, lambda: self.log(f"  {header_path} - Arduino C头文件，直接include使用", "success"))
-            self.root.after(0, lambda: self.log(f"  {output_base}_params.npz - 参数信息", "success"))
+            self.root.after(0, lambda: self.log(f"\n✅ 全部完成！输出文件:", "success"));
+            self.root.after(0, lambda: self.log(f"  {tflite_path} - INT8量化模型", "success"));
+            self.root.after(0, lambda: self.log(f"  {header_path} - Arduino C头文件，直接include使用", "success"));
+            self.root.after(0, lambda: self.log(f"  {output_base}_params.npz - 参数信息", "success"));
 
         except Exception as e:
-            self.root.after(0, lambda: self.log(f"训练出错: {str(e)}", "error"))
+            self.root.after(0, lambda: self.log(f"训练出错: {str(e)}", "error"));
             import traceback
-            self.root.after(0, lambda: self.log(traceback.format_exc(), "error"))
+            self.root.after(0, lambda: self.log(traceback.format_exc(), "error"));
         finally:
-            self.root.after(0, lambda: self.train_btn.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.train_btn.config(state=tk.NORMAL));
 
     def plot_training(self, history):
-        self.plot_figure.clear()
-        ax1 = self.plot_figure.add_subplot(121)
-        ax1.plot(history.history['accuracy'], label='train')
-        ax1.plot(history.history['val_accuracy'], label='val')
-        ax1.set_title('Accuracy')
-        ax1.legend()
-        ax2 = self.plot_figure.add_subplot(122)
-        ax2.plot(history.history['loss'], label='train')
-        ax2.plot(history.history['val_loss'], label='val')
-        ax2.set_title('Loss')
-        ax2.legend()
-        self.plot_figure.tight_layout()
-        self.plot_canvas.draw()
+        self.plot_figure.clear();
+        ax1 = self.plot_figure.add_subplot(121);
+        ax1.plot(history.history['accuracy'], label='train');
+        ax1.plot(history.history['val_accuracy'], label='val');
+        ax1.set_title('Accuracy');
+        ax1.legend();
+        ax2 = self.plot_figure.add_subplot(122);
+        ax2.plot(history.history['loss'], label='train');
+        ax2.plot(history.history['val_loss'], label='val');
+        ax2.set_title('Loss');
+        ax2.legend();
+        self.plot_figure.tight_layout();
+        self.plot_canvas.draw();
 
     def plot_confusion(self, cm, class_names):
-        self.cm_figure.clear()
-        ax = self.cm_figure.add_subplot(111)
-        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-        self.cm_figure.colorbar(im, ax=ax)
-        ax.set_xticks(np.arange(len(class_names)))
-        ax.set_yticks(np.arange(len(class_names)))
-        ax.set_xticklabels(class_names, rotation=45, ha="right", rotation_mode="anchor")
-        ax.set_yticklabels(class_names)
-        ax.set_ylabel('True Label')
-        ax.set_xlabel('Predicted Label')
+        self.cm_figure.clear();
+        ax = self.cm_figure.add_subplot(111);
+        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues);
+        self.cm_figure.colorbar(im, ax=ax);
+        ax.set_xticks(np.arange(len(class_names)));
+        ax.set_yticks(np.arange(len(class_names)));
+        ax.set_xticklabels(class_names, rotation=45, ha="right", rotation_mode="anchor");
+        ax.set_yticklabels(class_names);
+        ax.set_ylabel('True Label');
+        ax.set_xlabel('Predicted Label');
 
         # 标注数字
-        thresh = cm.max() / 2.
+        thresh = cm.max() / 2.;
         for i in range(cm.shape[0]):
             for j in range(cm.shape[1]):
                 ax.text(j, i, format(cm[i, j], 'd'),
                         ha="center", va="center",
-                        color="white" if cm[i, j] > thresh else "black")
-        self.cm_figure.tight_layout()
-        self.cm_canvas.draw()
+                        color="white" if cm[i, j] > thresh else "black");
+        self.cm_figure.tight_layout();
+        self.cm_canvas.draw();
 
 if __name__ == "__main__":
     import csv
     root = tk.Tk()
     app = TrainGUI(root)
+    root.protocol("WM_DELETE_WINDOW", app.stop_logging)
     root.mainloop()
