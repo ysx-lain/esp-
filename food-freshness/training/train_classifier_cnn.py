@@ -141,12 +141,19 @@ def plot_confusion_matrix(cm, class_names, output_path):
     plt.savefig(output_path, dpi=150)
     print(f"混淆矩阵已保存: {output_path}")
 
-def convert_to_tflite(model, output_path):
+def convert_to_tflite(model, output_path, X_train):
     """转换为INT8量化TFLite模型，适合ESP32部署"""
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     
     # INT8量化
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    # 需要提供代表性数据集进行校准
+    def representative_dataset_gen():
+        n_cal = min(100, X_train.shape[0])
+        for i in range(n_cal):
+            yield [X_train[np.newaxis, i].astype(np.float32)]
+    
+    converter.representative_dataset = representative_dataset_gen
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
     converter.inference_input_type = tf.int8
     converter.inference_output_type = tf.int8
@@ -293,7 +300,7 @@ def main():
     print("\n" + "=" * 60)
     print("导出INT8量化TFLite模型")
     print("=" * 60)
-    tflite_model = convert_to_tflite(model, f"{args.output}.tflite")
+    tflite_model = convert_to_tflite(model, f"{args.output}.tflite", X_train)
     
     # 8. 转换为C数组头文件
     tflite_bytes = list(tflite_model)

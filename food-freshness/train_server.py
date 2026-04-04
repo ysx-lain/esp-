@@ -86,9 +86,17 @@ def build_model(input_shape, num_classes, dropout_rate):
     model.add(Dense(num_classes, activation='softmax'))
     return model
 
-def convert_to_tflite(model, output_path):
+def convert_to_tflite(model, output_path, X_train):
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
+    
+    # 需要为INT8量化提供代表性数据集
+    def representative_dataset_gen():
+        n_cal = min(100, X_train.shape[0])
+        for i in range(n_cal):
+            yield [X_train[np.newaxis, i].astype(np.float32)]
+    
+    converter.representative_dataset = representative_dataset_gen
     converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
     converter.inference_input_type = tf.int8
     converter.inference_output_type = tf.int8
@@ -813,7 +821,7 @@ def training_worker(params):
         header_path = f"{output_base}.h"
 
         add_log(f"\n导出TFLite模型: {tflite_path}")
-        tflite_model = convert_to_tflite(model, tflite_path)
+        tflite_model = convert_to_tflite(model, tflite_path, X_train)
         size_kb = len(tflite_model) / 1024
         add_log(f"模型大小: {size_kb:.1f} KB")
 
