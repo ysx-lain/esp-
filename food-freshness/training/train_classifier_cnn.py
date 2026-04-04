@@ -30,14 +30,14 @@ import seaborn as sns
 
 def parse_args():
     parser = argparse.ArgumentParser(description='训练食材新鲜度分类模型 (1D-CNN)')
-    parser.add_argument('--data_dir', default='sensor_data', help='CSV数据文件夹路径')
+    parser.add_argument('--data_dir', default='../../sensor_data', help='CSV数据文件夹路径')
     parser.add_argument('--window_size', type=int, default=5, help='滑动窗口大小（帧数）')
     parser.add_argument('--window_step', type=int, default=2, help='滑动步长')
     parser.add_argument('--epochs', type=int, default=100, help='最大训练轮数')
     parser.add_argument('--batch_size', type=int, default=32, help='批次大小')
     parser.add_argument('--lr', type=float, default=0.001, help='学习率')
     parser.add_argument('--dropout', type=float, default=0.2, help='dropout比率')
-    parser.add_argument('--output', default='food_freshness_cnn', help='输出模型名')
+    parser.add_argument('--output', default='../../food_freshness_cnn', help='输出模型名')
     return parser.parse_args()
 
 def load_all_csv(data_dir):
