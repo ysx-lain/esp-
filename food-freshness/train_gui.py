@@ -100,7 +100,7 @@ class TrainGUI:
 
         ttk.Label(frame, text="采集频率(秒):").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=1, to=60, textvariable=self.sample_interval, width=8).grid(row=3, column=1, sticky=tk.W)
-        ttk.Label(frame, text="自动同步到采集端").grid(row=3, column=2, sticky=tk.W);
+        ttk.Button(frame, text="同步频率", command=self.sync_sample_interval).grid(row=3, column=2, padx=5);
 
         self.start_log_btn = ttk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED)
         self.start_log_btn.grid(row=4, column=0, columnspan=2, pady=5)
@@ -163,7 +163,7 @@ class TrainGUI:
         notebook.add(cm_frame, text="混淆矩阵")
         self.cm_figure = Figure(figsize=(8, 4), dpi=100)
         self.cm_canvas = FigureCanvasTkAgg(self.cm_figure, master=cm_frame)
-        self.cm_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.cm_canvas.get_tk_widget().pack(fill=tk.Both, expand=True)
 
     # ------------------ 串口和采集 ------------------
     def update_com_ports(self):
@@ -183,29 +183,36 @@ class TrainGUI:
         if d:
             self.data_dir.set(d)
 
+    def sync_sample_interval(self):
+        """同步采集频率到接收端，接收端会转发给发送端"""
+        if not self.ser or not self.ser.is_open:
+            messagebox.showerror("错误", "串口未连接，请先连接");
+            return;
+        interval = self.sample_interval.get();
+        cmd = f"set interval {interval}";
+        self.log(f"同步采集间隔: {interval} 秒 → {cmd}", "success");
+        try:
+            self.ser.write((cmd + "\n").encode());
+        except Exception as e:
+            self.log(f"同步失败: {str(e)}", "error");
+
     def connect_serial(self):
         port = self.port_combo.get()
         baud = int(self.baud_combo.get())
         if not port:
-            messagebox.showerror("错误", "请选择串口号")
-            return
+            messagebox.showerror("错误", "请选择串口号");
+            return;
         try:
-            self.ser = serial.Serial(port, baud, timeout=1)
-            self.connect_btn.config(text="已连接", state=tk.DISABLED)
-            self.start_log_btn.config(state=tk.NORMAL)
-            self.update_status("已连接", "green")
-            self.log(f"成功连接 {port} @ {baud} baud", "success")
-            # 同步采集频率到接收端，接收端会转发给发送端
-            interval = self.sample_interval.get()
-            cmd = f"set interval {interval}"
-            self.log(f"自动同步采集间隔: {interval} 秒", "success")
-            try:
-                self.ser.write((cmd + "\n").encode())
-            except Exception as e:
-                self.log(f"同步失败: {str(e)}", "error")
+            self.ser = serial.Serial(port, baud, timeout=1);
+            self.connect_btn.config(text="已连接", state=tk.DISABLED);
+            self.start_log_btn.config(state=tk.NORMAL);
+            self.update_status("已连接", "green");
+            self.log(f"成功连接 {port} @ {baud} baud", "success");
+            # 连接后自动同步一次
+            self.sync_sample_interval();
         except Exception as e:
-            messagebox.showerror("错误", f"连接失败: {str(e)}")
-            self.log(f"连接失败: {str(e)}", "error")
+            messagebox.showerror("错误", f"连接失败: {str(e)}");
+            self.log(f"连接失败: {str(e)}", "error");
 
     def update_status(self, text, color="black"):
         self.status_label.config(text=f"状态: {text}", foreground=color)
@@ -268,7 +275,7 @@ class TrainGUI:
             self.csv_file.close()
             self.csv_file = None
             self.csv_writer = None
-        self.start_log_btn.config(state=tk.NORMAL)
+        self.start_log_btn.config(state=tk.Normal)
         self.stop_log_btn.config(state=tk.DISABLED)
         self.update_status("已停止", "gray")
         self.log("采集已停止", "success")
@@ -401,80 +408,80 @@ class TrainGUI:
 
     def start_training(self):
         if not os.path.exists(self.data_dir.get()):
-            messagebox.showerror("错误", "数据目录不存在")
-            return
-        csv_files = glob.glob(os.path.join(self.data_dir.get(), '*.csv'))
+            messagebox.showerror("错误", "数据目录不存在");
+            return;
+        csv_files = glob.glob(os.path.join(self.data_dir.get(), '*.csv'));
         if len(csv_files) == 0:
-            messagebox.showerror("错误", "数据目录中没有找到CSV文件，请先采集数据")
-            return
+            messagebox.showerror("错误", "数据目录中没有找到CSV文件，请先采集数据");
+            return;
 
-        self.train_btn.config(state=tk.DISABLED)
-        self.log("\n" + "="*60, "info")
-        self.log("开始训练...", "info")
-        self.log(f"数据目录: {self.data_dir.get()}", "info")
-        self.log(f"找到 {len(csv_files)} 个CSV文件", "info")
+        self.train_btn.config(state=tk.DISABLED);
+        self.log("\n" + "="*60, "info");
+        self.log("开始训练...", "info");
+        self.log(f"数据目录: {self.data_dir.get()}", "info");
+        self.log(f"找到 {len(csv_files)} 个CSV文件", "info");
 
-        threading.Thread(target=self.training_thread, daemon=True).start()
+        threading.Thread(target=self.training_thread, daemon=True).start();
 
     def training_thread(self):
         try:
             # 加载所有CSV
-            all_dfs = []
+            all_dfs = [];
             for f in glob.glob(os.path.join(self.data_dir.get(), '*.csv')):
-                self.root.after(0, lambda f=f: self.log(f"  加载 {os.path.basename(f)}", "info"))
-                df = pd.read_csv(f)
-                all_dfs.append(df)
-            df = pd.concat(all_dfs, ignore_index=True)
-            self.root.after(0, lambda: self.log(f"\n总共 {len(df)} 条原始样本", "info"))
+                self.root.after(0, lambda f=f: self.log(f"  加载 {os.path.basename(f)}", "info"));
+                df = pd.read_csv(f);
+                all_dfs.append(df);
+            df = pd.concat(all_dfs, ignore_index=True);
+            self.root.after(0, lambda: self.log(f"\n总共 {len(df)} 条原始样本", "info"));
 
             # 提取特征标签
-            feature_cols = ['Odor', 'HCHO', 'CO', 'VOC', 'CO2']
-            X_raw = df[feature_cols].values
-            labels_raw = df['Label'].values
-            unique_labels = sorted(list(set(labels_raw)))
-            label_to_idx = {l:i for i,l in enumerate(unique_labels)}
-            y_raw = np.array([label_to_idx[l] for l in labels_raw])
+            feature_cols = ['Odor', 'HCHO', 'CO', 'VOC', 'CO2'];
+            X_raw = df[feature_cols].values;
+            labels_raw = df['Label'].values;
+            unique_labels = sorted(list(set(labels_raw)));
+            label_to_idx = {l:i for i,l in enumerate(unique_labels)};
+            y_raw = np.array([label_to_idx[l] for l in labels_raw]);
 
-            self.root.after(0, lambda: self.log(f"\n类别列表 ({len(unique_labels)} 类):", "info"))
+            self.root.after(0, lambda: self.log(f"\n类别列表 ({len(unique_labels)} 类):", "info"));
             for l,i in label_to_idx.items():
-                self.root.after(0, lambda l=l,i=i: self.log(f"  [{i}] {l}", "info"))
+                self.root.after(0, lambda l=l,i=i: self.log(f"  [{i}] {l}", "info"));
 
             # 滑动窗口
-            ws = self.window_size.get()
-            step = self.window_step.get()
+            ws = self.window_size.get();
+            step = self.window_step.get();
             if ws > 1:
-                X_window, y_window = self.create_sliding_windows(X_raw, y_raw, ws, step)
-                self.root.after(0, lambda: self.log(f"\n滑动窗口: 大小={ws}, 步长={step}, 生成 {X_window.shape[0]} 样本", "info"))
+                X_window, y_window = self.create_sliding_windows(X_raw, y_raw, ws, step);
+                self.root.after(0, lambda: self.log(f"\n滑动窗口: 大小={ws}, 步长={step}, 生成 {X_window.shape[0]} 样本", "info"));
             else:
-                X_window = X_raw[:, np.newaxis, :]
-                y_window = y_raw
+                X_window = X_raw[:, np.newaxis, :];
+                y_window = y_raw;
 
             # 标准化
-            n_features = X_window.shape[-1]
-            scaler = StandardScaler()
-            X_reshaped = X_window.reshape(-1, n_features)
-            X_scaled_reshaped = scaler.fit_transform(X_reshaped)
-            X = X_scaled_reshaped.reshape(X_window.shape)
+            n_features = X_window.shape[-1];
+            scaler = StandardScaler();
+            X_reshaped = X_window.reshape(-1, n_features);
+            X_scaled_reshaped = scaler.fit_transform(X_reshaped);
+            X = X_scaled_reshaped.reshape(X_window.shape);
 
             # 划分数据集
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y_window, test_size=0.2, random_state=42, stratify=y_window
-            )
-            self.root.after(0, lambda: self.log(f"\n训练集: {X_train.shape[0]} 样本", "info"))
-            self.root.after(0, lambda: self.log(f"测试集: {X_test.shape[0]} 样本", "info"))
+            );
+            self.root.after(0, lambda: self.log(f"\n训练集: {X_train.shape[0]} 样本", "info"));
+            self.root.after(0, lambda: self.log(f"测试集: {X_test.shape[0]} 样本", "info"));
 
             # 构建模型
-            num_classes = len(unique_labels)
-            model = self.build_model(X.shape[1:], num_classes, self.dropout.get())
+            num_classes = len(unique_labels);
+            model = self.build_model(X.shape[1:], num_classes, self.dropout.get());
             model.compile(
                 optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate.get()),
                 loss='sparse_categorical_crossentropy',
                 metrics=['accuracy']
-            )
+            );
 
             # 训练
-            early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
-            self.root.after(0, lambda: self.log("\n开始训练...", "info"))
+            early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True);
+            self.root.after(0, lambda: self.log("\n开始训练...", "info"));
 
             history = model.fit(
                 X_train, y_train,
@@ -483,91 +490,91 @@ class TrainGUI:
                 validation_split=0.1,
                 callbacks=[early_stop],
                 verbose=0
-            )
+            );
 
             # 评估
-            test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
-            self.root.after(0, lambda: self.log(f"\n训练完成，测试准确率: {test_acc:.4f}", "success"))
+            test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0);
+            self.root.after(0, lambda: self.log(f"\n训练完成，测试准确率: {test_acc:.4f}", "success"));
 
-            y_pred = model.predict(X_test, verbose=0)
-            y_pred_classes = np.argmax(y_pred, axis=1)
-            report = classification_report(y_test, y_pred_classes, target_names=unique_labels)
-            self.root.after(0, lambda: self.log("\n分类报告:\n" + report, "info"))
+            y_pred = model.predict(X_test, verbose=0);
+            y_pred_classes = np.argmax(y_pred, axis=1);
+            report = classification_report(y_test, y_pred_classes, target_names=unique_labels);
+            self.root.after(0, lambda: self.log("\n分类报告:\n" + report, "info"));
 
             # 绘制训练曲线
-            self.root.after(0, lambda: self.plot_training(history))
+            self.root.after(0, lambda: self.plot_training(history));
 
             # 绘制混淆矩阵
-            cm = confusion_matrix(y_test, y_pred_classes)
-            self.root.after(0, lambda: self.plot_confusion(cm, unique_labels))
+            cm = confusion_matrix(y_test, y_pred_classes);
+            self.root.after(0, lambda: self.plot_confusion(cm, unique_labels));
 
             # 导出
-            output_base = self.output_name.get()
-            tflite_path = f"{output_base}.tflite"
-            header_path = f"{output_base}.h"
+            output_base = self.output_name.get();
+            tflite_path = f"{output_base}.tflite";
+            header_path = f"{output_base}.h";
 
-            self.root.after(0, lambda: self.log(f"\n导出TFLite模型: {tflite_path}", "info"))
-            tflite_model = self.convert_to_tflite(model, tflite_path)
-            size_kb = len(tflite_model) / 1024
-            self.root.after(0, lambda: self.log(f"模型大小: {size_kb:.1f} KB", "info"))
+            self.root.after(0, lambda: self.log(f"\n导出TFLite模型: {tflite_path}", "info"));
+            tflite_model = self.convert_to_tflite(model, tflite_path);
+            size_kb = len(tflite_model) / 1024;
+            self.root.after(0, lambda: self.log(f"模型大小: {size_kb:.1f} KB", "info"));
 
-            self.root.after(0, lambda: self.log(f"导出C头文件: {header_path}", "info"))
-            self.tflite_to_c_array(list(tflite_model), header_path)
+            self.root.after(0, lambda: self.log(f"导出C头文件: {header_path}", "info"));
+            self.tflite_to_c_array(list(tflite_model), header_path);
 
             # 保存参数
             np.savez(f"{output_base}_params.npz", 
                     mean=scaler.mean_, 
                     std=np.sqrt(scaler.var_),
-                    classes=np.array(unique_labels, dtype=object))
+                    classes=np.array(unique_labels, dtype=object));
 
-            self.root.after(0, lambda: self.log(f"\n✅ 全部完成！输出文件:", "success"))
-            self.root.after(0, lambda: self.log(f"  {tflite_path} - INT8量化模型", "success"))
-            self.root.after(0, lambda: self.log(f"  {header_path} - Arduino C头文件，直接include使用", "success"))
-            self.root.after(0, lambda: self.log(f"  {output_base}_params.npz - 参数信息", "success"))
+            self.root.after(0, lambda: self.log(f"\n✅ 全部完成！输出文件:", "success"));
+            self.root.after(0, lambda: self.log(f"  {tflite_path} - INT8量化模型", "success"));
+            self.root.after(0, lambda: self.log(f"  {header_path} - Arduino C头文件，直接include使用", "success"));
+            self.root.after(0, lambda: self.log(f"  {output_base}_params.npz - 参数信息", "success"));
 
         except Exception as e:
-            self.root.after(0, lambda: self.log(f"训练出错: {str(e)}", "error"))
+            self.root.after(0, lambda: self.log(f"训练出错: {str(e)}", "error"));
             import traceback
-            self.root.after(0, lambda: self.log(traceback.format_exc(), "error"))
+            self.root.after(0, lambda: self.log(traceback.format_exc(), "error"));
         finally:
-            self.root.after(0, lambda: self.train_btn.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.train_btn.config(state=tk.Normal));
 
     def plot_training(self, history):
-        self.plot_figure.clear()
-        ax1 = self.plot_figure.add_subplot(121)
-        ax1.plot(history.history['accuracy'], label='train')
-        ax1.plot(history.history['val_accuracy'], label='val')
-        ax1.set_title('Accuracy')
-        ax1.legend()
-        ax2 = self.plot_figure.add_subplot(122)
-        ax2.plot(history.history['loss'], label='train')
-        ax2.plot(history.history['val_loss'], label='val')
-        ax2.set_title('Loss')
-        ax2.legend()
-        self.plot_figure.tight_layout()
-        self.plot_canvas.draw()
+        self.plot_figure.clear();
+        ax1 = self.plot_figure.add_subplot(121);
+        ax1.plot(history.history['accuracy'], label='train');
+        ax1.plot(history.history['val_accuracy'], label='val');
+        ax1.set_title('Accuracy');
+        ax1.legend();
+        ax2 = self.plot_figure.add_subplot(122);
+        ax2.plot(history.history['loss'], label='train');
+        ax2.plot(history.history['val_loss'], label='val');
+        ax2.set_title('Loss');
+        ax2.legend();
+        self.plot_figure.tight_layout();
+        self.plot_canvas.draw();
 
     def plot_confusion(self, cm, class_names):
-        self.cm_figure.clear()
-        ax = self.cm_figure.add_subplot(111)
-        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-        self.cm_figure.colorbar(im, ax=ax)
-        ax.set_xticks(np.arange(len(class_names)))
-        ax.set_yticks(np.arange(len(class_names)))
-        ax.set_xticklabels(class_names, rotation=45, ha="right", rotation_mode="anchor")
-        ax.set_yticklabels(class_names)
-        ax.set_ylabel('True Label')
-        ax.set_xlabel('Predicted Label')
+        self.cm_figure.clear();
+        ax = self.cm_figure.add_subplot(111);
+        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues);
+        self.cm_figure.colorbar(im, ax=ax);
+        ax.set_xticks(np.arange(len(class_names)));
+        ax.set_yticks(np.arange(len(class_names)));
+        ax.set_xticklabels(class_names, rotation=45, ha="right", rotation_mode="anchor");
+        ax.set_yticklabels(class_names);
+        ax.set_ylabel('True Label');
+        ax.set_xlabel('Predicted Label');
 
         # 标注数字
-        thresh = cm.max() / 2.
+        thresh = cm.max() / 2.;
         for i in range(cm.shape[0]):
             for j in range(cm.shape[1]):
                 ax.text(j, i, format(cm[i, j], 'd'),
                         ha="center", va="center",
-                        color="white" if cm[i, j] > thresh else "black")
-        self.cm_figure.tight_layout()
-        self.cm_canvas.draw()
+                        color="white" if cm[i, j] > thresh else "black");
+        self.cm_figure.tight_layout();
+        self.cm_canvas.draw();
 
 if __name__ == "__main__":
     import csv
