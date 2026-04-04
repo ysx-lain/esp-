@@ -13,6 +13,10 @@
 #include <SD.h>
 #include <SPI.h>
 
+#if defined(ESP32) && !defined(VSPI)
+#define VSPI VSPI
+#endif
+
 // 默认模型文件名
 #define DEFAULT_MODEL_NAME "food_freshness.bin"
 #define MAX_MODEL_SIZE  (128 * 1024)  // 最大128KB，足够我们的模型

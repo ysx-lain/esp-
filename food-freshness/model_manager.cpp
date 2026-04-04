@@ -15,8 +15,9 @@ ModelManager::~ModelManager() {
 }
 
 bool ModelManager::begin() {
-    _spi = new SPIClass(VSPI);
-    _spi->begin();
+    // ESP32 VSPI 默认引脚
+    _spi = new SPIClass();
+    _spi->begin(18, 19, 23, _csPin); // SCK, MISO, MOSI, CS
     pinMode(_csPin, OUTPUT);
     digitalWrite(_csPin, HIGH);
 
