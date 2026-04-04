@@ -136,7 +136,7 @@ class TrainGUI:
         ttk.Spinbox(frame, from_=10, to=300, textvariable=self.epochs, width=8).grid(row=2, column=1, sticky=tk.W)
 
         ttk.Label(frame, text="批次大小:").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=8, to=128, textvariable=self.batch_size, width=8).grid(row=3, column=1, sticky=W)
+        ttk.Spinbox(frame, from_=8, to=128, textvariable=self.batch_size, width=8).grid(row=3, column=1, sticky=tk.W)
 
         ttk.Label(frame, text="学习率:").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=0.0001, to=0.01, textvariable=self.learning_rate, width=8, increment=0.0001).grid(row=4, column=1, sticky=tk.W)
@@ -577,7 +577,7 @@ class TrainGUI:
             import traceback
             self.root.after(0, lambda: self.log(traceback.format_exc(), "error"))
         finally:
-            self.root.after(0, lambda: self.train_btn.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.train_btn.config(state=tk.Normal))
 
     def plot_training(self, history):
         self.plot_figure.clear()
