@@ -114,8 +114,6 @@ class TrainGUI:
         self.start_log_btn = tk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED, bg="#4CAF50", fg="white")
         self.start_log_btn.grid(row=5, column=0, columnspan=2, pady=5)
         self.stop_log_btn = tk.Button(frame, text="停止采集", command=self.stop_logging, state=tk.DISABLED, bg="#f44336", fg="white")
-        self.stop_log_btn.grid(row=4, column=2, pady=5) if False else None
-
         self.stop_log_btn.grid(row=5, column=2, pady=5)
 
         self.status_label = tk.Label(frame, text="状态: 未连接", foreground="gray")
