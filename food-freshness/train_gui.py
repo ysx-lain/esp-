@@ -7,6 +7,7 @@
 3. 一键训练，自动滑动窗口预处理 → 训练 → 量化 → 导出C头文件
 4. 显示训练曲线和混淆矩阵
 5. 自动同步采集频率到ESP32
+6. 支持定时采集，从第一组数据开始计时，到点自动停止
 """
 
 import tkinter as tk
@@ -47,6 +48,10 @@ class TrainGUI:
         self.thread = None
         self.csv_file = None
         self.csv_writer = None
+        self.auto_stop_timer_thread = None
+        self.first_block_received = False
+        self.timer_start_time = 0
+        self.auto_stop_minutes = 10
         
         self.data_dir = tk.StringVar(value="sensor_data")
         self.label_text = tk.StringVar(value="apple_fresh")
@@ -58,41 +63,41 @@ class TrainGUI:
         self.learning_rate = tk.DoubleVar(value=0.001)
         self.dropout = tk.DoubleVar(value=0.2)
         self.output_name = tk.StringVar(value="food_freshness")
+        self.auto_stop_minutes_var = tk.DoubleVar(value=10)
 
         self.create_widgets()
         self.update_com_ports()
-        self.root.after(5000, self.periodic_refresh)
 
     def create_widgets(self):
         # 左侧面板 - 设置
-        left = ttk.Frame(self.root, padding=10, width=350)
+        left = tk.Frame(self.root, padding=10, width=350)
         left.pack(side=tk.LEFT, fill=tk.Y)
         left.pack_propagate(False)
 
         # 串口设置
-        frame = ttk.LabelFrame(left, text="串口连接", padding=5)
+        frame = tk.LabelFrame(left, text="串口连接", padding=5)
         frame.pack(fill=tk.X, pady=(0,10))
 
         ttk.Label(frame, text="串口号:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
         self.port_combo = ttk.Combobox(frame, width=15)
         self.port_combo.grid(row=0, column=1, padx=5)
-        ttk.Button(frame, text="刷新", command=self.update_com_ports).grid(row=0, column=2, padx=5)
+        tk.Button(frame, text="刷新", command=self.update_com_ports, bg="#2196F3", fg="white").grid(row=0, column=2, padx=5)
 
         ttk.Label(frame, text="波特率:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
         self.baud_combo = ttk.Combobox(frame, values=["9600","115200","230400"], 
                                       textvariable=tk.StringVar(value="115200"), width=10)
         self.baud_combo.grid(row=1, column=1, padx=5, sticky=tk.W)
 
-        self.connect_btn = ttk.Button(frame, text="连接", command=self.connect_serial)
+        self.connect_btn = tk.Button(frame, text="连接", command=self.connect_serial, bg="#2196F3", fg="white")
         self.connect_btn.grid(row=2, column=0, columnspan=2, pady=5)
 
         # 数据采集
-        frame = ttk.LabelFrame(left, text="数据采集", padding=5)
+        frame = tk.LabelFrame(left, text="数据采集", padding=5)
         frame.pack(fill=tk.X, pady=(0,10))
 
         ttk.Label(frame, text="保存目录:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Entry(frame, textvariable=self.data_dir, width=20).grid(row=0, column=1, padx=5, sticky=tk.W)
-        ttk.Button(frame, text="浏览", command=self.select_dir).grid(row=0, column=2, padx=5)
+        tk.Button(frame, text="浏览", command=self.select_dir, bg="#2196F3", fg="white").grid(row=0, column=2, padx=5)
 
         ttk.Label(frame, text="当前标签:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Entry(frame, textvariable=self.label_text, width=20).grid(row=1, column=1, columnspan=2, padx=5, sticky=tk.W)
@@ -100,18 +105,27 @@ class TrainGUI:
 
         ttk.Label(frame, text="采集频率(秒):").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=1, to=60, textvariable=self.sample_interval, width=8).grid(row=3, column=1, sticky=tk.W)
-        tk.Button(frame, text="同步频率", command=self.sync_sample_interval).grid(row=3, column=2, padx=5);
+        tk.Button(frame, text="同步频率", command=self.sync_sample_interval, bg="#2196F3", fg="white").grid(row=3, column=2, padx=5);
 
-        self.start_log_btn = tk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED)
-        self.start_log_btn.grid(row=4, column=0, columnspan=2, pady=5)
-        self.stop_log_btn = tk.Button(frame, text="停止采集", command=self.stop_logging, state=tk.DISABLED)
-        self.stop_log_btn.grid(row=4, column=2, pady=5)
+        ttk.Label(frame, text="自动停止(分钟):").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=0, to=120, textvariable=self.auto_stop_minutes_var, width=8).grid(row=4, column=1, sticky=tk.W)
+        ttk.Label(frame, text="0=不停止, 从第一包计时").grid(row=4, column=2, sticky=tk.W);
+
+        self.start_log_btn = tk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED, bg="#4CAF50", fg="white")
+        self.start_log_btn.grid(row=5, column=0, columnspan=2, pady=5)
+        self.stop_log_btn = tk.Button(frame, text="停止采集", command=self.stop_logging, state=tk.DISABLED, bg="#f44336", fg="white")
+        self.stop_log_btn.grid(row=4, column=2, pady=5) if False else None
+
+        self.stop_log_btn.grid(row=5, column=2, pady=5)
 
         self.status_label = tk.Label(frame, text="状态: 未连接", foreground="gray")
-        self.status_label.grid(row=5, column=0, columnspan=3, pady=2)
+        self.status_label.grid(row=6, column=0, columnspan=3, pady=2)
+
+        self.timer_label = tk.Label(frame, text="", foreground="#d32f2f", font=("bold", 12))
+        self.timer_label.grid(row=7, column=0, columnspan=3, pady=2)
 
         # 训练参数
-        frame = ttk.LabelFrame(left, text="训练参数", padding=5)
+        frame = tk.LabelFrame(left, text="训练参数", padding=5)
         frame.pack(fill=tk.X, pady=(0,10))
 
         ttk.Label(frame, text="滑动窗口大小:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
@@ -124,7 +138,7 @@ class TrainGUI:
         ttk.Spinbox(frame, from_=10, to=300, textvariable=self.epochs, width=8).grid(row=2, column=1, sticky=tk.W)
 
         ttk.Label(frame, text="批次大小:").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=8, to=128, textvariable=self.batch_size, width=8).grid(row=3, column=1, sticky=tk.W)
+        ttk.Spinbox(frame, from_=8, to=128, textvariable=self.batch_size, width=8).grid(row=3, column=1, sticky=W)
 
         ttk.Label(frame, text="学习率:").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=0.0001, to=0.01, textvariable=self.learning_rate, width=8, increment=0.0001).grid(row=4, column=1, sticky=tk.W)
@@ -139,7 +153,7 @@ class TrainGUI:
         self.train_btn.grid(row=7, column=0, columnspan=3, pady=10)
 
         # 右侧面板 - 输出和图表
-        right = ttk.Frame(self.root, padding=10)
+        right = tk.Frame(self.root, padding=10)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         notebook = ttk.Notebook(right)
@@ -174,10 +188,6 @@ class TrainGUI:
             self.port_combo.set(port_list[0])
         self.log(f"刷新串口，找到 {len(port_list)} 个设备")
 
-    def periodic_refresh(self):
-        self.update_com_ports()
-        self.root.after(5000, self.periodic_refresh)
-
     def select_dir(self):
         d = filedialog.askdirectory()
         if d:
@@ -186,33 +196,33 @@ class TrainGUI:
     def sync_sample_interval(self):
         """同步采集频率到接收端，接收端会转发给发送端"""
         if not self.ser or not self.ser.is_open:
-            messagebox.showerror("错误", "串口未连接，请先连接");
-            return;
-        interval = self.sample_interval.get();
-        cmd = f"set interval {interval}";
-        self.log(f"同步采集间隔: {interval} 秒 → {cmd}", "success");
+            messagebox.showerror("错误", "串口未连接，请先连接")
+            return
+        interval = self.sample_interval.get()
+        cmd = f"set interval {interval}\n"
+        self.log(f"同步采集间隔: {interval} 秒 → {cmd.strip()}")
         try:
-            self.ser.write((cmd + "\n").encode());
+            self.ser.write(cmd.encode())
         except Exception as e:
-            self.log(f"同步失败: {str(e)}", "error");
+            self.log(f"同步失败: {str(e)}", "error")
 
     def connect_serial(self):
         port = self.port_combo.get()
         baud = int(self.baud_combo.get())
         if not port:
-            messagebox.showerror("错误", "请选择串口号");
-            return;
+            messagebox.showerror("错误", "请选择串口号")
+            return
         try:
-            self.ser = serial.Serial(port, baud, timeout=1);
-            self.connect_btn.config(text="已连接", state=tk.DISABLED);
-            self.start_log_btn.config(state=tk.NORMAL);
-            self.update_status("已连接", "green");
-            self.log(f"成功连接 {port} @ {baud} baud", "success");
-            # 连接后自动同步一次
-            self.sync_sample_interval();
+            self.ser = serial.Serial(port, baud, timeout=1)
+            self.connect_btn.config(text="已连接", state=tk.DISABLED, bg="#cccccc")
+            self.start_log_btn.config(state=tk.NORMAL)
+            self.update_status("已连接", "green")
+            self.log(f"成功连接 {port} @ {baud} baud", "success")
+            # 同步采集频率到接收端，接收端会转发给发送端
+            self.sync_sample_interval()
         except Exception as e:
-            messagebox.showerror("错误", f"连接失败: {str(e)}");
-            self.log(f"连接失败: {str(e)}", "error");
+            messagebox.showerror("错误", f"连接失败: {str(e)}")
+            self.log(f"连接失败: {str(e)}", "error")
 
     def update_status(self, text, color="black"):
         self.status_label.config(text=f"状态: {text}", foreground=color)
@@ -233,6 +243,23 @@ class TrainGUI:
         self.log_text.see(tk.END)
         self.root.update_idletasks()
 
+    def check_auto_stop(self):
+        """自动停止定时器 - 从第一包接收后开始计时"""
+        while self.is_logging and self.auto_stop_minutes > 0:
+            elapsed_min = (time.time() - self.timer_start_time) / 60.0
+            remaining = self.auto_stop_minutes - elapsed_min
+            if remaining <= 0:
+                self.log(f"⏰ 定时采集到达设定时间 ({self.auto_stop_minutes} 分钟)，自动停止", "success")
+                self.root.after(0, self.stop_logging)
+                break
+            else:
+                m = int(remaining)
+                s = int((remaining - m) * 60)
+                self.root.after(0, lambda: self.timer_label.config(text=f"剩余时间: {m}:{s:02d}"))
+            time.sleep(1)
+        if self.is_logging:
+            self.timer_label.config(text="")
+
     def start_logging(self):
         if self.is_logging:
             return
@@ -244,11 +271,13 @@ class TrainGUI:
             messagebox.showerror("错误", "请填写标签 (如: apple_fresh)")
             return
         
+        self.auto_stop_minutes = self.auto_stop_minutes_var.get()
         os.makedirs(self.data_dir.get(), exist_ok=True)
         start_str = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = os.path.join(self.data_dir.get(), f'{label}_{start_str}.csv')
         
         try:
+            import csv
             self.csv_file = open(filename, 'w', newline='', encoding='utf-8-sig')
             self.csv_writer = csv.writer(self.csv_file)
             header = ['Time_s', 'Odor', 'HCHO', 'CO', 'VOC', 'CO2', 'Label']
@@ -259,13 +288,20 @@ class TrainGUI:
             return
         
         self.is_logging = True
+        self.first_block_received = False
         self.start_log_btn.config(state=tk.DISABLED)
         self.stop_log_btn.config(state=tk.NORMAL)
         self.update_status(f"采集中 - {label}", "green")
-        self.log(f"开始采集，标签: {label}, 文件: {filename}", "success")
+        self.log(f"开始采集，标签: {label}, 文件: {filename}（每个标签单独CSV）", "success")
+        if self.auto_stop_minutes > 0:
+            self.log(f"⏰ 自动停止设置: {self.auto_stop_minutes} 分钟，第一组数据到达后开始计时", "info")
         
         self.thread = threading.Thread(target=self.reader_thread, daemon=True)
         self.thread.start()
+
+        if self.auto_stop_minutes > 0:
+            self.auto_stop_timer_thread = threading.Thread(target=self.check_auto_stop, daemon=True)
+            self.auto_stop_timer_thread.start()
 
     def stop_logging(self):
         if not self.is_logging:
@@ -278,6 +314,7 @@ class TrainGUI:
         self.start_log_btn.config(state=tk.NORMAL)
         self.stop_log_btn.config(state=tk.DISABLED)
         self.update_status("已停止", "gray")
+        self.timer_label.config(text="")
         self.log("采集已停止", "success")
 
     def reader_thread(self):
@@ -293,10 +330,14 @@ class TrainGUI:
                 if raw.startswith("========== 接收到传感器数据 =========="):
                     block_lines = []
                     inside_block = True
+                    if not self.first_block_received:
+                        self.root.after(0, lambda: self.log("✅ 收到第一组数据，开始计时", "success"))
+                        self.first_block_received = True
+                        self.timer_start_time = time.time()
                     continue
                 elif raw.startswith("======================================") and inside_block:
                     record = self.parse_block(block_lines)
-                    if record:
+                    if record and self.csv_writer:
                         self.root.after(0, lambda r=record: self.write_record(r))
                     inside_block = False
                     block_lines = []
@@ -344,6 +385,7 @@ class TrainGUI:
         # record: [time_s, odor, hcho, co, voc, co2, label]
         self.csv_writer.writerow(record)
         self.csv_file.flush()
+        self.log(f"记录样本: Odor={record[1]} HCHO={record[2]} CO={record[3]} VOC={record[4]} CO2={record[5]}", "data")
 
     # ------------------ 训练 ------------------
     def create_sliding_windows(self, X, y, window_size, step):
@@ -408,80 +450,80 @@ class TrainGUI:
 
     def start_training(self):
         if not os.path.exists(self.data_dir.get()):
-            messagebox.showerror("错误", "数据目录不存在");
-            return;
-        csv_files = glob.glob(os.path.join(self.data_dir.get(), '*.csv'));
+            messagebox.showerror("错误", "数据目录不存在")
+            return
+        csv_files = glob.glob(os.path.join(self.data_dir.get(), '*.csv'))
         if len(csv_files) == 0:
-            messagebox.showerror("错误", "数据目录中没有找到CSV文件，请先采集数据");
-            return;
+            messagebox.showerror("错误", "数据目录中没有找到CSV文件，请先采集数据")
+            return
 
-        self.train_btn.config(state=tk.DISABLED);
-        self.log("\n" + "="*60, "info");
-        self.log("开始训练...", "info");
-        self.log(f"数据目录: {self.data_dir.get()}", "info");
-        self.log(f"找到 {len(csv_files)} 个CSV文件", "info");
+        self.train_btn.config(state=tk.DISABLED)
+        self.log("\n" + "="*60, "info")
+        self.log("开始训练...", "info")
+        self.log(f"数据目录: {self.data_dir.get()}", "info")
+        self.log(f"找到 {len(csv_files)} 个CSV文件", "info")
 
-        threading.Thread(target=self.training_thread, daemon=True).start();
+        threading.Thread(target=self.training_thread, daemon=True).start()
 
     def training_thread(self):
         try:
             # 加载所有CSV
-            all_dfs = [];
+            all_dfs = []
             for f in glob.glob(os.path.join(self.data_dir.get(), '*.csv')):
-                self.root.after(0, lambda f=f: self.log(f"  加载 {os.path.basename(f)}", "info"));
-                df = pd.read_csv(f);
-                all_dfs.append(df);
-            df = pd.concat(all_dfs, ignore_index=True);
-            self.root.after(0, lambda: self.log(f"\n总共 {len(df)} 条原始样本", "info"));
+                self.root.after(0, lambda f=f: self.log(f"  加载 {os.path.basename(f)}", "info"))
+                df = pd.read_csv(f)
+                all_dfs.append(df)
+            df = pd.concat(all_dfs, ignore_index=True)
+            self.root.after(0, lambda: self.log(f"\n总共 {len(df)} 条原始样本", "info"))
 
             # 提取特征标签
-            feature_cols = ['Odor', 'HCHO', 'CO', 'VOC', 'CO2'];
-            X_raw = df[feature_cols].values;
-            labels_raw = df['Label'].values;
-            unique_labels = sorted(list(set(labels_raw)));
-            label_to_idx = {l:i for i,l in enumerate(unique_labels)};
-            y_raw = np.array([label_to_idx[l] for l in labels_raw]);
+            feature_cols = ['Odor', 'HCHO', 'CO', 'VOC', 'CO2']
+            X_raw = df[feature_cols].values
+            labels_raw = df['Label'].values
+            unique_labels = sorted(list(set(labels_raw)))
+            label_to_idx = {l:i for i,l in enumerate(unique_labels)}
+            y_raw = np.array([label_to_idx[l] for l in labels_raw])
 
-            self.root.after(0, lambda: self.log(f"\n类别列表 ({len(unique_labels)} 类):", "info"));
+            self.root.after(0, lambda: self.log(f"\n类别列表 ({len(unique_labels)} 类):", "info"))
             for l,i in label_to_idx.items():
-                self.root.after(0, lambda l=l,i=i: self.log(f"  [{i}] {l}", "info"));
+                self.root.after(0, lambda l=l,i=i: self.log(f"  [{i}] {l}", "info"))
 
             # 滑动窗口
-            ws = self.window_size.get();
-            step = self.window_step.get();
+            ws = self.window_size.get()
+            step = self.window_step.get()
             if ws > 1:
-                X_window, y_window = self.create_sliding_windows(X_raw, y_raw, ws, step);
-                self.root.after(0, lambda: self.log(f"\n滑动窗口: 大小={ws}, 步长={step}, 生成 {X_window.shape[0]} 样本", "info"));
+                X_window, y_window = self.create_sliding_windows(X_raw, y_raw, ws, step)
+                self.root.after(0, lambda: self.log(f"\n滑动窗口: 大小={ws}, 步长={step}, 生成 {X_window.shape[0]} 样本", "info"))
             else:
-                X_window = X_raw[:, np.newaxis, :];
-                y_window = y_raw;
+                X_window = X_raw[:, np.newaxis, :]
+                y_window = y_raw
 
             # 标准化
-            n_features = X_window.shape[-1];
-            scaler = StandardScaler();
-            X_reshaped = X_window.reshape(-1, n_features);
-            X_scaled_reshaped = scaler.fit_transform(X_reshaped);
-            X = X_scaled_reshaped.reshape(X_window.shape);
+            n_features = X_window.shape[-1]
+            scaler = StandardScaler()
+            X_reshaped = X_window.reshape(-1, n_features)
+            X_scaled_reshaped = scaler.fit_transform(X_reshaped)
+            X = X_scaled_reshaped.reshape(X_window.shape)
 
             # 划分数据集
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y_window, test_size=0.2, random_state=42, stratify=y_window
-            );
-            self.root.after(0, lambda: self.log(f"\n训练集: {X_train.shape[0]} 样本", "info"));
-            self.root.after(0, lambda: self.log(f"测试集: {X_test.shape[0]} 样本", "info"));
+            )
+            self.root.after(0, lambda: self.log(f"\n训练集: {X_train.shape[0]} 样本", "info"))
+            self.root.after(0, lambda: self.log(f"测试集: {X_test.shape[0]} 样本", "info"))
 
             # 构建模型
-            num_classes = len(unique_labels);
-            model = self.build_model(X.shape[1:], num_classes, self.dropout.get());
+            num_classes = len(unique_labels)
+            model = self.build_model(X.shape[1:], num_classes, self.dropout.get())
             model.compile(
                 optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate.get()),
                 loss='sparse_categorical_crossentropy',
                 metrics=['accuracy']
-            );
+            )
 
             # 训练
-            early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True);
-            self.root.after(0, lambda: self.log("\n开始训练...", "info"));
+            early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
+            self.root.after(0, lambda: self.log("\n开始训练...", "info"))
 
             history = model.fit(
                 X_train, y_train,
@@ -490,91 +532,91 @@ class TrainGUI:
                 validation_split=0.1,
                 callbacks=[early_stop],
                 verbose=0
-            );
+            )
 
             # 评估
-            test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0);
-            self.root.after(0, lambda: self.log(f"\n训练完成，测试准确率: {test_acc:.4f}", "success"));
+            test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
+            self.root.after(0, lambda: self.log(f"\n训练完成，测试准确率: {test_acc:.4f}", "success"))
 
-            y_pred = model.predict(X_test, verbose=0);
-            y_pred_classes = np.argmax(y_pred, axis=1);
-            report = classification_report(y_test, y_pred_classes, target_names=unique_labels);
-            self.root.after(0, lambda: self.log("\n分类报告:\n" + report, "info"));
+            y_pred = model.predict(X_test, verbose=0)
+            y_pred_classes = np.argmax(y_pred, axis=1)
+            report = classification_report(y_test, y_pred_classes, target_names=unique_labels)
+            self.root.after(0, lambda: self.log("\n分类报告:\n" + report, "info"))
 
             # 绘制训练曲线
-            self.root.after(0, lambda: self.plot_training(history));
+            self.root.after(0, lambda: self.plot_training(history))
 
             # 绘制混淆矩阵
-            cm = confusion_matrix(y_test, y_pred_classes);
-            self.root.after(0, lambda: self.plot_confusion(cm, unique_labels));
+            cm = confusion_matrix(y_test, y_pred_classes)
+            self.root.after(0, lambda: self.plot_confusion(cm, unique_labels))
 
             # 导出
-            output_base = self.output_name.get();
-            tflite_path = f"{output_base}.tflite";
-            header_path = f"{output_base}.h";
+            output_base = self.output_name.get()
+            tflite_path = f"{output_base}.tflite"
+            header_path = f"{output_base}.h"
 
-            self.root.after(0, lambda: self.log(f"\n导出TFLite模型: {tflite_path}", "info"));
-            tflite_model = self.convert_to_tflite(model, tflite_path);
-            size_kb = len(tflite_model) / 1024;
-            self.root.after(0, lambda: self.log(f"模型大小: {size_kb:.1f} KB", "info"));
+            self.root.after(0, lambda: self.log(f"\n导出TFLite模型: {tflite_path}", "info"))
+            tflite_model = self.convert_to_tflite(model, tflite_path)
+            size_kb = len(tflite_model) / 1024
+            self.root.after(0, lambda: self.log(f"模型大小: {size_kb:.1f} KB", "info"))
 
-            self.root.after(0, lambda: self.log(f"导出C头文件: {header_path}", "info"));
-            self.tflite_to_c_array(list(tflite_model), header_path);
+            self.root.after(0, lambda: self.log(f"导出C头文件: {header_path}", "info"))
+            self.tflite_to_c_array(list(tflite_model), header_path)
 
             # 保存参数
             np.savez(f"{output_base}_params.npz", 
                     mean=scaler.mean_, 
                     std=np.sqrt(scaler.var_),
-                    classes=np.array(unique_labels, dtype=object));
+                    classes=np.array(unique_labels, dtype=object))
 
-            self.root.after(0, lambda: self.log(f"\n✅ 全部完成！输出文件:", "success"));
-            self.root.after(0, lambda: self.log(f"  {tflite_path} - INT8量化模型", "success"));
-            self.root.after(0, lambda: self.log(f"  {header_path} - Arduino C头文件，直接include使用", "success"));
-            self.root.after(0, lambda: self.log(f"  {output_base}_params.npz - 参数信息", "success"));
+            self.root.after(0, lambda: self.log(f"\n✅ 全部完成！输出文件:", "success"))
+            self.root.after(0, lambda: self.log(f"  {tflite_path} - INT8量化模型", "success"))
+            self.root.after(0, lambda: self.log(f"  {header_path} - Arduino C头文件，直接include使用", "success"))
+            self.root.after(0, lambda: self.log(f"  {output_base}_params.npz - 参数信息", "success"))
 
         except Exception as e:
-            self.root.after(0, lambda: self.log(f"训练出错: {str(e)}", "error"));
+            self.root.after(0, lambda: self.log(f"训练出错: {str(e)}", "error"))
             import traceback
-            self.root.after(0, lambda: self.log(traceback.format_exc(), "error"));
+            self.root.after(0, lambda: self.log(traceback.format_exc(), "error"))
         finally:
-            self.root.after(0, lambda: self.train_btn.config(state=tk.Normal));
+            self.root.after(0, lambda: self.train_btn.config(state=tk.NORMAL))
 
     def plot_training(self, history):
-        self.plot_figure.clear();
-        ax1 = self.plot_figure.add_subplot(121);
-        ax1.plot(history.history['accuracy'], label='train');
-        ax1.plot(history.history['val_accuracy'], label='val');
-        ax1.set_title('Accuracy');
-        ax1.legend();
-        ax2 = self.plot_figure.add_subplot(122);
-        ax2.plot(history.history['loss'], label='train');
-        ax2.plot(history.history['val_loss'], label='val');
-        ax2.set_title('Loss');
-        ax2.legend();
-        self.plot_figure.tight_layout();
-        self.plot_canvas.draw();
+        self.plot_figure.clear()
+        ax1 = self.plot_figure.add_subplot(121)
+        ax1.plot(history.history['accuracy'], label='train')
+        ax1.plot(history.history['val_accuracy'], label='val')
+        ax1.set_title('Accuracy')
+        ax1.legend()
+        ax2 = self.plot_figure.add_subplot(122)
+        ax2.plot(history.history['loss'], label='train')
+        ax2.plot(history.history['val_loss'], label='val')
+        ax2.set_title('Loss')
+        ax2.legend()
+        self.plot_figure.tight_layout()
+        self.plot_canvas.draw()
 
     def plot_confusion(self, cm, class_names):
-        self.cm_figure.clear();
-        ax = self.cm_figure.add_subplot(111);
-        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues);
-        self.cm_figure.colorbar(im, ax=ax);
-        ax.set_xticks(np.arange(len(class_names)));
-        ax.set_yticks(np.arange(len(class_names)));
-        ax.set_xticklabels(class_names, rotation=45, ha="right", rotation_mode="anchor");
-        ax.set_yticklabels(class_names);
-        ax.set_ylabel('True Label');
-        ax.set_xlabel('Predicted Label');
+        self.cm_figure.clear()
+        ax = self.cm_figure.add_subplot(111)
+        im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+        self.cm_figure.colorbar(im, ax=ax)
+        ax.set_xticks(np.arange(len(class_names)))
+        ax.set_yticks(np.arange(len(class_names)))
+        ax.set_xticklabels(class_names, rotation=45, ha="right", rotation_mode="anchor")
+        ax.set_yticklabels(class_names)
+        ax.set_ylabel('True Label')
+        ax.set_xlabel('Predicted Label')
 
         # 标注数字
-        thresh = cm.max() / 2.;
+        thresh = cm.max() / 2.
         for i in range(cm.shape[0]):
             for j in range(cm.shape[1]):
                 ax.text(j, i, format(cm[i, j], 'd'),
                         ha="center", va="center",
-                        color="white" if cm[i, j] > thresh else "black");
-        self.cm_figure.tight_layout();
-        self.cm_canvas.draw();
+                        color="white" if cm[i, j] > thresh else "black")
+        self.cm_figure.tight_layout()
+        self.cm_canvas.draw()
 
 if __name__ == "__main__":
     import csv
