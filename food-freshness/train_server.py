@@ -65,23 +65,25 @@ def create_sliding_windows(X, y, window_size, step):
     return np.array(windows), np.array(labels)
 
 def build_model(input_shape, num_classes, dropout_rate):
-    model = Sequential([
-        Conv1D(16, kernel_size=3, activation='relu', input_shape=input_shape),
-        BatchNormalization(),
-        MaxPooling1D(pool_size=2),
-        Dropout(dropout_rate),
-        
-        Conv1D(32, kernel_size=2, activation='relu'),
-        BatchNormalization(),
-        MaxPooling1D(pool_size=2),
-        Dropout(dropout_rate),
-        
-        Flatten(),
-        Dense(16, activation='relu'),
-        BatchNormalization(),
-        Dropout(dropout_rate),
-        Dense(num_classes, activation='softmax')
-    ])
+    seq_len = input_shape[0]
+    model = Sequential()
+    model.add(Conv1D(16, kernel_size=3, activation='relu', input_shape=input_shape))
+    model.add(BatchNormalization())
+    if seq_len > 5:
+        model.add(MaxPooling1D(pool_size=2))
+    model.add(Dropout(dropout_rate))
+    
+    model.add(Conv1D(32, kernel_size=2, activation='relu'))
+    model.add(BatchNormalization())
+    if seq_len > 10:
+        model.add(MaxPooling1D(pool_size=2))
+    model.add(Dropout(dropout_rate))
+    
+    model.add(Flatten())
+    model.add(Dense(16, activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(dropout_rate))
+    model.add(Dense(num_classes, activation='softmax'))
     return model
 
 def convert_to_tflite(model, output_path):
