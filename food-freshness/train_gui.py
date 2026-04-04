@@ -286,6 +286,8 @@ class TrainGUI:
     def check_auto_stop(self):
         """自动停止定时器 - 从第一包接收后开始计时"""
         while self.is_logging and self.auto_stop_minutes > 0:
+            if not self.is_logging:
+                break  # 已经手动停止采集，直接退出
             elapsed_min = (time.time() - self.timer_start_time) / 60.0
             remaining = self.auto_stop_minutes - elapsed_min
             if remaining <= 0:
