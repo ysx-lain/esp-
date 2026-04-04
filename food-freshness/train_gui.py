@@ -3,15 +3,17 @@
 智能食材新鲜度检测 - 一体化训练GUI
 功能：
 1. 连接串口实时查看传感器数据
-2. 点击开始采集数据，自动保存带标签CSV
+2. 点击开始采集数据，自动保存带标签CSV（每个标签单独文件）
 3. 一键训练，自动滑动窗口预处理 → 训练 → 量化 → 导出C头文件
 4. 显示训练曲线和混淆矩阵
 5. 自动同步采集频率到ESP32
 6. 支持定时采集，从第一组数据开始计时，到点自动停止
+7. 移除自动刷新串口，避免爆发式采集问题
 """
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from tkinter import scrolledtext
 import threading
 import time
 import os
@@ -65,8 +67,20 @@ class TrainGUI:
         self.output_name = tk.StringVar(value="food_freshness")
         self.auto_stop_minutes_var = tk.DoubleVar(value=10)
 
+        # 缓存多行数据块
+        self.block_lines = []
+        self.inside_block = False
+
+        # 防抖定时器
+        self.interval_change_timer = None
+
         self.create_widgets()
         self.update_com_ports()
+        # 移除自动定时刷新串口 → 彻底解决爆发式采集问题
+        # self.root.after(2000, self.periodic_refresh)
+
+        # 监听采集间隔变化
+        self.sample_interval.trace_add('write', self.on_sample_interval_changed)
 
     def create_widgets(self):
         # 左侧面板 - 设置
@@ -104,8 +118,8 @@ class TrainGUI:
         ttk.Label(frame, text="格式: category_freshness").grid(row=2, column=1, columnspan=2, sticky=tk.W)
 
         ttk.Label(frame, text="采集频率(秒):").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=1, to=60, textvariable=self.sample_interval, width=8).grid(row=3, column=1, sticky=tk.W)
-        tk.Button(frame, text="同步频率", command=self.sync_sample_interval, bg="#2196F3", fg="white").grid(row=3, column=2, padx=5);
+        ttk.Spinbox(frame, from_=2, to=60, textvariable=self.sample_interval, width=8).grid(row=3, column=1, sticky=tk.W)
+        tk.Button(frame, text="同步频率", command=self.sync_interval, bg="#2196F3", fg="white").grid(row=3, column=2, padx=5);
 
         ttk.Label(frame, text="自动停止(分钟):").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=0, to=120, textvariable=self.auto_stop_minutes_var, width=8).grid(row=4, column=1, sticky=tk.W)
@@ -160,10 +174,16 @@ class TrainGUI:
         # 日志页
         log_frame = ttk.Frame(notebook)
         notebook.add(log_frame, text="日志")
-        self.log_text = tk.Text(log_frame, height=20, font=("Consolas", 9))
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=20, font=("Consolas", 9))
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        # 图表页
+        # 实时数据页
+        data_frame = ttk.Frame(notebook)
+        notebook.add(data_frame, text="实时数据")
+        self.data_text = scrolledtext.ScrolledText(data_frame, height=20, font=("Consolas", 9))
+        self.data_text.pack(fill=tk.BOTH, expand=True)
+
+        # 训练曲线页
         plot_frame = ttk.Frame(notebook)
         notebook.add(plot_frame, text="训练曲线")
         self.plot_figure = Figure(figsize=(8, 4), dpi=100)
@@ -191,18 +211,36 @@ class TrainGUI:
         if d:
             self.data_dir.set(d)
 
-    def sync_sample_interval(self):
-        """同步采集频率到接收端，接收端会转发给发送端"""
+    def send_command_to_sensor(self, cmd):
         if not self.ser or not self.ser.is_open:
-            messagebox.showerror("错误", "串口未连接，请先连接")
-            return
-        interval = self.sample_interval.get()
-        cmd = f"set interval {interval}\n"
-        self.log(f"同步采集间隔: {interval} 秒 → {cmd.strip()}")
+            self.log(f"串口未打开，无法发送命令: {cmd}", "error")
+            return False
         try:
-            self.ser.write(cmd.encode())
+            self.ser.write((cmd + "\n").encode())
+            self.log(f"已发送命令: {cmd}", "success")
+            return True
         except Exception as e:
-            self.log(f"同步失败: {str(e)}", "error")
+            self.log(f"发送命令失败: {e}", "error")
+            return False
+
+    def sync_interval(self):
+        interval = self.sample_interval.get()
+        if interval < 2:
+            self.log(f"采集间隔 {interval} 秒过小，强制设为2秒", "warning")
+            interval = 2
+            self.sample_interval.set(interval)
+        cmd = f"set interval {interval}"
+        if self.is_logging and self.ser and self.ser.is_open:
+            self.send_command_to_sensor(cmd)
+        else:
+            self.log(f"未在采集中，间隔同步命令暂不发送: {cmd}", "info")
+
+    def on_sample_interval_changed(self, *args):
+        if not self.is_logging:
+            return
+        if self.interval_change_timer:
+            self.root.after_cancel(self.interval_change_timer)
+        self.interval_change_timer = self.root.after(1000, self.sync_interval)
 
     def connect_serial(self):
         port = self.port_combo.get()
@@ -216,8 +254,8 @@ class TrainGUI:
             self.start_log_btn.config(state=tk.NORMAL)
             self.update_status("已连接", "green")
             self.log(f"成功连接 {port} @ {baud} baud", "success")
-            # 同步采集频率到接收端，接收端会转发给发送端
-            self.sync_sample_interval()
+            # 同步初始采集频率
+            self.sync_interval()
         except Exception as e:
             messagebox.showerror("错误", f"连接失败: {str(e)}")
             self.log(f"连接失败: {str(e)}", "error")
@@ -227,18 +265,30 @@ class TrainGUI:
 
     def log(self, msg, level="info"):
         ts = datetime.now().strftime("%H:%M:%S")
-        tag = ""
         if level == "error":
-            tag = "❌ "
+            self.log_text.insert(tk.END, f"[{ts}] ❌ {msg}\n", "error")
             self.log_text.tag_config("error", foreground="red")
         elif level == "success":
-            tag = "✅ "
+            self.log_text.insert(tk.END, f"[{ts}] ✅ {msg}\n", "success")
             self.log_text.tag_config("success", foreground="green")
         elif level == "data":
-            tag = "📟 "
+            self.log_text.insert(tk.END, f"[{ts}] 📟 {msg}\n", "data")
             self.log_text.tag_config("data", foreground="blue")
-        self.log_text.insert(tk.END, f"[{ts}] {tag}{msg}\n", level)
+        elif level == "warning":
+            self.log_text.insert(tk.END, f"[{ts}] ⚠️ {msg}\n", "warning")
+            self.log_text.tag_config("warning", foreground="orange")
+        else:
+            self.log_text.insert(tk.END, f"[{ts}] {msg}\n")
         self.log_text.see(tk.END)
+        self.root.update_idletasks()
+
+    def append_display(self, record):
+        # record: [time_s, odor, hcho, co, voc, co2]
+        line = f"Time:{record[0]:8d}s | O:{record[1]:5.2f} | H:{record[2]:5.2f} | C:{record[3]:5.2f} | V:{record[4]:5.2f} | CO2:{record[5]:4d}\n"
+        self.data_text.insert(tk.END, line)
+        if int(self.data_text.index('end-1c').split('.')[0]) > 21:
+            self.data_text.delete('1.0', '2.0')
+        self.data_text.see(tk.END)
         self.root.update_idletasks()
 
     def check_auto_stop(self):
@@ -287,6 +337,8 @@ class TrainGUI:
         
         self.is_logging = True
         self.first_block_received = False
+        self.block_lines = []
+        self.inside_block = False
         self.start_log_btn.config(state=tk.DISABLED)
         self.stop_log_btn.config(state=tk.NORMAL)
         self.update_status(f"采集中 - {label}", "green")
@@ -314,38 +366,6 @@ class TrainGUI:
         self.update_status("已停止", "gray")
         self.timer_label.config(text="")
         self.log("采集已停止", "success")
-
-    def reader_thread(self):
-        block_lines = []
-        inside_block = False
-        while self.is_logging and self.ser and self.ser.is_open:
-            try:
-                raw = self.ser.readline().decode('utf-8', errors='ignore').rstrip('\r\n')
-                if not raw:
-                    continue
-                self.root.after(0, lambda r=raw: self.log(f"RAW: {r}", "data"))
-
-                if raw.startswith("========== 接收到传感器数据 =========="):
-                    block_lines = []
-                    inside_block = True
-                    if not self.first_block_received:
-                        self.root.after(0, lambda: self.log("✅ 收到第一组数据，开始计时", "success"))
-                        self.first_block_received = True
-                        self.timer_start_time = time.time()
-                    continue
-                elif raw.startswith("======================================") and inside_block:
-                    record = self.parse_block(block_lines)
-                    if record and self.csv_writer:
-                        self.root.after(0, lambda r=record: self.write_record(r))
-                    inside_block = False
-                    block_lines = []
-                    continue
-                elif inside_block:
-                    block_lines.append(raw)
-
-            except Exception as e:
-                self.root.after(0, lambda e=e: self.log(f"串口异常: {str(e)}", "error"))
-                break
 
     def parse_block(self, lines):
         import re
@@ -383,7 +403,41 @@ class TrainGUI:
         # record: [time_s, odor, hcho, co, voc, co2, label]
         self.csv_writer.writerow(record)
         self.csv_file.flush()
-        self.log(f"记录样本: Odor={record[1]} HCHO={record[2]} CO={record[3]} VOC={record[4]} CO2={record[5]}", "data")
+        self.log(f"记录样本: Time={record[0]}s, O={record[1]}, H={record[2]}, C={record[3]}, V={record[4]}, CO2={record[5]}", "data")
+        self.append_display(record[:6])
+
+    def reader_thread(self):
+        while self.is_logging and self.ser and self.ser.is_open:
+            try:
+                raw = self.ser.readline().decode('utf-8', errors='ignore').rstrip('\r\n')
+                if not raw:
+                    continue
+                self.root.after(0, lambda r=raw: self.log(f"RAW: {r}", "data"))
+
+                if raw.startswith("========== 接收到传感器数据 =========="):
+                    self.block_lines = []
+                    self.inside_block = True
+                    if not self.first_block_received:
+                        self.root.after(0, lambda: self.log("✅ 收到第一组数据，开始计时", "success"))
+                        self.first_block_received = True
+                        self.timer_start_time = time.time()
+                    continue
+                elif raw.startswith("======================================") and self.inside_block:
+                    record = self.parse_block(self.block_lines)
+                    if record and self.csv_writer:
+                        self.root.after(0, lambda r=record: self.write_record(r))
+                    self.inside_block = False
+                    self.block_lines = []
+                    continue
+                elif self.inside_block:
+                    self.block_lines.append(raw)
+
+            except serial.SerialException as e:
+                self.root.after(0, lambda e=e: self.log(f"串口异常: {e}", "error"))
+                break
+            except Exception as e:
+                self.root.after(0, lambda e=e: self.log(f"未知错误: {e}", "error"))
+                break
 
     # ------------------ 训练 ------------------
     def create_sliding_windows(self, X, y, window_size, step):
@@ -577,7 +631,7 @@ class TrainGUI:
             import traceback
             self.root.after(0, lambda: self.log(traceback.format_exc(), "error"))
         finally:
-            self.root.after(0, lambda: self.train_btn.config(state=tk.Normal))
+            self.root.after(0, lambda: self.train_btn.config(state=tk.NORMAL))
 
     def plot_training(self, history):
         self.plot_figure.clear()
@@ -597,6 +651,7 @@ class TrainGUI:
     def plot_confusion(self, cm, class_names):
         self.cm_figure.clear()
         ax = self.cm_figure.add_subplot(111)
+        import matplotlib.pyplot as plt
         im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
         self.cm_figure.colorbar(im, ax=ax)
         ax.set_xticks(np.arange(len(class_names)))
