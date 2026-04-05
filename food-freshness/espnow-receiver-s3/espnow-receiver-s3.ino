@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 简化版：模型存储在SD卡，不需要自定义flash分区，适配chirale库
+ * 简化版：模型存储在SD卡，不需要自定义flash分区，适配chirale库旧API
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -312,8 +312,10 @@ void serialTask(void *arg) {
         Serial.println("\n===== 模型信息 =====");
         if (model_loaded) {
           Serial.println("✅ Model loaded");
-          Serial.printf("  Input size: %d\n", interpreter->inputs().size);
-          Serial.printf("  Output size: %d\n", interpreter->outputs().size);
+          int input_size = interpreter->inputs()->size();
+          int output_size = interpreter->outputs()->size();
+          Serial.printf("  Input size: %d\n", input_size);
+          Serial.printf("  Output size: %d\n", output_size);
         } else {
           Serial.println("❌ Model not loaded");
         }
@@ -498,17 +500,22 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
+  // 旧API: 获取输入张量指针
+  TfLiteTensor* input_tensor = interpreter->input(0);
   for (int i = 0; i < 5; i++) {
-    interpreter->typed_input<float>(input[i], &i);
+    input_tensor->data.f[i] = input[i];
   }
   
   interpreter->Invoke();
   
+  // 获取输出，找到最大概率类别
   int predictedClass = 0;
   float maxProb = 0.0f;
-  int outputSize = interpreter->outputs().size;
-  for (int i = 0; i < outputSize; i++) {
-    float prob = interpreter->typed_output<float>(i);
+  TfLiteTensor* output_tensor = interpreter->output(0);
+  int outputSize = output_tensor->dims->size;
+  // 实际output数组大小就是类别数
+  for (int i = 0; i < numClasses; i++) {
+    float prob = output_tensor->data.f[i];
     if (prob > maxProb) {
       maxProb = prob;
       predictedClass = i;
