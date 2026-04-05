@@ -118,13 +118,8 @@ public:
         Serial.println("请从电脑发送二进制模型文件...");
         Serial.printf("超时: %d 秒，最大: %d bytes\n", timeoutSeconds, MAX_MODEL_SIZE);
 
-        // 先分配临时buffer存放接收的数据
-        uint8_t *tempBuffer = (uint8_t *)malloc(MAX_MODEL_SIZE);
-        if (!tempBuffer) {
-            strncpy(_lastError, "malloc failed for temp buffer", sizeof(_lastError)-1);
-            return false;
-        }
-
+        // 使用静态buffer，不需要malloc，永远不会失败
+        static uint8_t tempBuffer[MAX_MODEL_SIZE];
         unsigned long start = millis();
         size_t bytesReceived = 0;
 
@@ -147,13 +142,11 @@ public:
 
         if (bytesReceived == 0) {
             strncpy(_lastError, "No data received within timeout", sizeof(_lastError)-1);
-            free(tempBuffer);
             return false;
         }
 
         if (bytesReceived >= MAX_MODEL_SIZE) {
             strncpy(_lastError, "Model too large, increase MAX_MODEL_SIZE", sizeof(_lastError)-1);
-            free(tempBuffer);
             return false;
         }
 
@@ -164,7 +157,6 @@ public:
         err = esp_partition_erase_range(_partition, 0, _partition->size);
         if (err != ESP_OK) {
             strncpy(_lastError, esp_err_to_name(err), sizeof(_lastError)-1);
-            free(tempBuffer);
             return false;
         }
         Serial.printf("⚡ 分区擦除完成\n");
@@ -172,18 +164,14 @@ public:
         err = esp_partition_write(_partition, 0, &size, sizeof(size));
         if (err != ESP_OK) {
             strncpy(_lastError, esp_err_to_name(err), sizeof(_lastError)-1);
-            free(tempBuffer);
             return false;
         }
 
         err = esp_partition_write(_partition, sizeof(size), tempBuffer, bytesReceived);
         if (err != ESP_OK) {
             strncpy(_lastError, esp_err_to_name(err), sizeof(_lastError)-1);
-            free(tempBuffer);
             return false;
         }
-
-        free(tempBuffer);
 
         Serial.printf("✅ 模型写入flash完成: %zu bytes\n", bytesReceived);
         Serial.println("🎉 新模型已生效，无需重启！");
