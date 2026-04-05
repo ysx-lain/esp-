@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 完全按照 chirale/TensorFlowLite_ESP32 官方示例最简洁写法
+ * 适配 chirale/TensorFlowLite_ESP32 1.0 版本
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,7 +18,7 @@
 #include <time.h>
 #include <Arduino.h>
 
-// 官方示例只需要这一个头文件，它已经包含了所有需要的东西
+// 官方写法：只需要这一个头文件 (chirale 1.0/2.0 通用)
 #include <TensorFlowLite_ESP32.h>
 
 #include "esp_nn.h"
@@ -278,8 +278,10 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // Enable ESP-NN optimizations
+  // Enable ESP-NN optimizations (if available)
+  #if defined(ESP_NN_VERSION)
   esp_nn_enable();
+  #endif
 
   Serial.println("✅ TFLite initialization complete");
   return true;
@@ -507,8 +509,9 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
+  // chirale 1.0: use old API - input()->data.f instead of typed_input
   for (int i = 0; i < 5; i++) {
-    interpreter->typed_input<float>(input[i], &i);
+    interpreter->input()->data.f[i] = input[i];
   }
   
   interpreter->Invoke();
@@ -517,7 +520,7 @@ int runInference(const SensorData &data) {
   float maxProb = 0.0f;
   int output_size = interpreter->outputs().size();
   for (int i = 0; i < output_size; i++) {
-    float prob = interpreter->typed_output<float>(i);
+    float prob = interpreter->output()->data.f[i];
     if (prob > maxProb) {
       maxProb = prob;
       predictedClass = i;
