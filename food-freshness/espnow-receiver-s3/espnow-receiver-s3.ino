@@ -22,12 +22,8 @@
 #include <time.h>
 
 // TensorFlow Lite for Microcontrollers - chirale library
+// All headers are already included by TensorFlowLite_ESP32.h
 #include <TensorFlowLite_ESP32.h>
-#include "all_ops_resolver.h"
-#include "micro_error_reporter.h"
-#include "micro_interpreter.h"
-#include "schema/schema_generated.h"
-#include "version.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
