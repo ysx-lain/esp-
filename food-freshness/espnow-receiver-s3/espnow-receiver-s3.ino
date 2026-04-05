@@ -278,6 +278,11 @@ void modelUpgradeTask(void *arg) {
           Serial.println("❌ 模型管理未初始化");
           continue;
         }
+        // 清除缓冲区，直接开始接收二进制数据
+        while (Serial.available()) {
+          Serial.read();
+          delay(1);
+        }
         bool ok = modelMgr->receiveAndWriteModel(Serial);
         if (ok) {
           Serial.println("✅ 模型接收成功！已写入flash分区，无需重启直接生效");

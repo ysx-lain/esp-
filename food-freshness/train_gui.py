@@ -340,9 +340,11 @@ class TrainGUI:
                     self.ser.write(chunk)
                     self.ser.flush()
                     time.sleep(0.01)  # 短暂延时让ESP处理
+            # 发送完成等待所有数据被接收
             self.ser.flush()
+            time.sleep(1.0)  # 等待最后一包数据被ESP接收
             self.log(f"✅ 发送完成，总共 {len(data)} bytes", "success")
-            self.log("⌛ 等待ESP接收完成，完成后会显示结果，重启ESP加载新模型", "info")
+            self.log("⌛ 等待ESP接收完成，完成后会显示结果，新模型接收成功直接生效无需重启", "info")
         except Exception as e:
             messagebox.showerror("错误", f"发送失败: {str(e)}")
             self.log(f"发送失败: {str(e)}", "error")
