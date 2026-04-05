@@ -504,6 +504,13 @@ void preprocessInput(const SensorData &data, float input[5]) {
 
 // 运行推理，返回预测类别
 int runInference(const SensorData &data) {
+  if (!modelMgr || !modelMgr->isInitialized()) {
+    // 模型未初始化，返回默认
+    _lastConfidence = 0.0f;
+    _lastPredicted = 0;
+    return 0;
+  }
+
   float input[5];
   preprocessInput(data, input);
   
