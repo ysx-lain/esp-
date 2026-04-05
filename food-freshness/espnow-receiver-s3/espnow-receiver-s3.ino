@@ -54,7 +54,7 @@ const unsigned long STARTUP_GRACE = 120000;
 const int OFFLINE_CONFIRM_COUNT = 2;
 
 // SD卡模型升级配置
-#define SD_CS_PIN 5  // 根据你的硬件修改CS引脚
+#define SD_CS_PIN 15  // 根据你的硬件修改CS引脚
 
 unsigned long startTime = 0;
 SensorData latestData;
