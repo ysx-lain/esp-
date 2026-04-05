@@ -1,7 +1,7 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 适配 tanakamasayuki/Arduino_TensorFlowLite_ESP32 版本
- * 所有类型在全局命名空间
+ * 适配 tanakamasayuki/Arduino_TensorFlowLite_ESP32
+ * 所有类型在 tflite 命名空间，添加 using namespace
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -19,8 +19,9 @@
 #include <time.h>
 #include <Arduino.h>
 
-// tanakamasayuki/Arduino_TensorFlowLite_ESP32 - all types in global namespace
+// tanakamasayuki/Arduino_TensorFlowLite_ESP32
 #include "TensorFlowLite_ESP32.h"
+using namespace tflite;
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -90,7 +91,7 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite - all types in global namespace
+// TensorFlow Lite - using namespace tflite
 namespace {
   MicroErrorReporter micro_error_reporter;
   AllOpsResolver resolver;
