@@ -30,15 +30,20 @@ public:
     // 初始化 - 查找自定义model分区
     bool begin() {
         // 查找标签为"model"的分区
-        _partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, "model");
-        if (!_partition) {
-            // 尝试找任何未命名的数据分区，大小够就行
-            _partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, NULL);
-            while (_partition) {
-                if (_partition->size >= MAX_MODEL_SIZE) {
+        // esp_partition_find_first directly returns a pointer to the partition structure
+        const esp_partition_t *found = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_ANY, "model");
+        if (found) {
+            _partition = found;
+        } else {
+            // 尝试找任何足够大的数据分区
+            esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, NULL);
+            while (it) {
+                found = esp_partition_get(it);
+                if (found->size >= MAX_MODEL_SIZE) {
+                    _partition = found;
                     break;
                 }
-                _partition = esp_partition_next(_partition);
+                it = esp_partition_next(it);
             }
         }
 

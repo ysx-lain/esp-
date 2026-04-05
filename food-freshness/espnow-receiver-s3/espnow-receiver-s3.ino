@@ -16,6 +16,9 @@
 
 #include <esp_now.h>
 #include <WiFi.h>
+#include <SD.h>
+#include <SPI.h>
+#include <time.h>
 #include "model_manager.h"
 
 // ==================== 数据结构（与发送端一致） ====================
