@@ -12,6 +12,7 @@
  * 分工：
  * - 模型 → flash自定义分区（256KB），读取快，无需重启
  * - 传感器历史数据 → SD卡存储（CSV格式）
+ * 适配：chirale/TensorFlowLite_ESP32
  */
 
 #include <esp_now.h>
@@ -19,7 +20,14 @@
 #include <SD.h>
 #include <SPI.h>
 #include <time.h>
-#include "model_manager.h"
+
+// TensorFlow Lite for Microcontrollers - chirale library
+#include <TensorFlowLite_ESP32.h>
+#include "all_ops_resolver.h"
+#include "micro_error_reporter.h"
+#include "micro_interpreter.h"
+#include "schema/schema_generated.h"
+#include "version.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -68,6 +76,9 @@ const int OFFLINE_CONFIRM_COUNT = 2;
 #define SD_MOSI 13
 #define SD_CS   15
 
+// 模型配置
+#define MAX_MODEL_SIZE  (256 * 1024)  // 256KB足够
+
 unsigned long startTime = 0;
 SensorData latestData;
 bool hasValidSensorData = false;
@@ -82,19 +93,30 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// 模型管理 - 使用flash自定义分区存储模型
-ModelManager *modelMgr = nullptr;
+// ==================== TensorFlow Lite 全局变量（直接在这里） ====================
+// 模型分区
+const esp_partition_t *model_partition = nullptr;
+uint8_t *model_buffer = nullptr;
+uint8_t *tensor_arena = nullptr;
+MicroInterpreter *interpreter = nullptr;
+MicroErrorReporter *error_reporter = nullptr;
+bool model_initialized = false;
+char last_error[128] = "";
+
+// 推理结果缓存
+float last_confidence = 0.0f;
+int last_predicted = 0;
 
 // SD卡 - 存储传感器历史数据
 SPIClass *sd_spi = nullptr;
 bool sd_ready = false;
 File data_file;
 
-// 推理结果缓存
-float _lastConfidence = 0.0f;
-int _lastPredicted = 0;
-
 // ==================== 函数声明 ====================
+bool findModelPartition();
+size_t getModelSize();
+bool loadModelFromFlash();
+bool receiveAndWriteModel(Stream &stream, int timeoutSeconds = 60);
 bool initSD();
 void logSensorDataToSD(const SensorData &data, int pred_class, float freshness);
 void logSensorDataToSD(const SensorData &data);
@@ -105,6 +127,7 @@ void checkAllConnections();
 int runInference(const SensorData &data);
 float getConfidence();
 int calculateFreshnessScore(float confidence, int predictedClass);
+void modelUpgradeTask(void *arg);
 
 // 类别名称 - 根据训练时的类别顺序定义
 // 如果你的类别不同，请修改这里
@@ -114,11 +137,12 @@ const char *classNames[] = {
   "apple_rotten",
   // 添加更多类别...
 };
+int numClasses = sizeof(classNames) / sizeof(classNames[0]);
+
 void sendCommand(const char* cmd);
 void printSensorData();
 void printWarmupStatus(const WarmupStatus &w);
 String getStatusString(uint8_t status);
-void modelUpgradeTask(void *arg);
 
 // ==================== setup ====================
 void setup() {
@@ -128,19 +152,23 @@ void setup() {
   Serial.println("可用命令: set interval <秒>, skip warmup, status, update model, info model");
   startTime = millis();
 
-  // 初始化flash分区模型管理
-  modelMgr = new ModelManager();
-  if (!modelMgr->begin()) {
-    Serial.printf("⚠️ 模型分区初始化失败: %s\n", modelMgr->getLastError());
-    Serial.println("可以继续使用内置模型，无法OTA升级");
+  // 查找并初始化flash分区模型
+  if (!findModelPartition()) {
+    Serial.printf("⚠️ 模型分区初始化失败: %s\n", last_error);
+    Serial.println("可以继续使用，发送 'update model' 升级模型");
     Serial.println("请检查 partitions.csv 是否添加了model分区");
   } else {
-    Serial.println("✅ 模型分区初始化完成");
-    if (modelMgr->hasModel()) {
-      Serial.printf("📦 分区中找到模型文件，大小: %zu bytes (%.1f KB)\n", 
-        modelMgr->getModelSize(), (float)modelMgr->getModelSize() / 1024);
+    Serial.printf("✅ 找到模型分区: %s, 大小: %d bytes (%.1f KB)\n", 
+      model_partition->label, model_partition->size, (float)model_partition->size / 1024);
+    // 如果分区中有模型，加载它
+    if (getModelSize() > 0 && getModelSize() <= MAX_MODEL_SIZE) {
+      if (loadModelFromFlash()) {
+        Serial.printf("📦 模型加载完成，大小: %zu bytes\n", getModelSize());
+      } else {
+        Serial.printf("⚠️ 加载模型失败: %s\n", last_error);
+      }
     } else {
-      Serial.println("⚠️ 分区中没有找到模型，使用内置模型");
+      Serial.println("⚠️ 分区中没有找到有效模型");
       Serial.println("发送 'update model' 开始串口升级模型");
     }
   }
@@ -216,6 +244,220 @@ void setup() {
   Serial.println("等待数据...");
 }
 
+// ==================== 查找模型分区 ====================
+bool findModelPartition() {
+  last_error[0] = '\0';
+  // 查找标签为"model"的分区
+  const esp_partition_t *found = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "model");
+  if (found) {
+    model_partition = found;
+  } else {
+    // 尝试找任何足够大的数据分区
+    esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, NULL);
+    while (it) {
+      found = esp_partition_get(it);
+      if (found->size >= MAX_MODEL_SIZE) {
+        model_partition = found;
+        break;
+      }
+      it = esp_partition_next(it);
+    }
+  }
+
+  if (!model_partition) {
+    strncpy(last_error, "No model partition found, check partitions.csv", sizeof(last_error)-1);
+    return false;
+  }
+  return true;
+}
+
+// ==================== 获取模型大小 ====================
+size_t getModelSize() {
+  if (!model_partition) return 0;
+  size_t size = 0;
+  esp_err_t err = esp_partition_read(model_partition, 0, &size, sizeof(size_t));
+  if (err != ESP_OK) {
+    return 0;
+  }
+  return size;
+}
+
+// ==================== 从flash加载模型 ====================
+bool loadModelFromFlash() {
+  last_error[0] = '\0';
+  if (!model_partition) {
+    strncpy(last_error, "No model partition", sizeof(last_error)-1);
+    return false;
+  }
+  size_t storedSize = getModelSize();
+  if (storedSize == 0) {
+    strncpy(last_error, "No model stored", sizeof(last_error)-1);
+    return false;
+  }
+  if (storedSize > MAX_MODEL_SIZE) {
+    strncpy(last_error, "Model too large for buffer", sizeof(last_error)-1);
+    return false;
+  }
+
+  // 如果之前有加载模型，释放内存
+  if (interpreter) {
+    delete interpreter;
+    interpreter = nullptr;
+  }
+  if (model_buffer) {
+    free(model_buffer);
+    model_buffer = nullptr;
+  }
+  if (tensor_arena) {
+    free(tensor_arena);
+    tensor_arena = nullptr;
+  }
+
+  // 分配模型缓冲区
+  model_buffer = (uint8_t*)heap_caps_malloc(storedSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!model_buffer) {
+    strncpy(last_error, "malloc failed for model buffer", sizeof(last_error)-1);
+    return false;
+  }
+
+  // 跳过前4字节（存储大小），读取模型数据
+  esp_err_t err = esp_partition_read(model_partition, sizeof(size_t), model_buffer, storedSize);
+  if (err != ESP_OK) {
+    strncpy(last_error, esp_err_to_name(err), sizeof(last_error)-1);
+    free(model_buffer);
+    model_buffer = nullptr;
+    return false;
+  }
+
+  // 初始化TensorFlow Lite Micro
+  const Model* model = GetModel(model_buffer);
+  if (model->version() != TFLITE_SCHEMA_VERSION) {
+    strncpy(last_error, "Model schema version mismatch", sizeof(last_error)-1);
+    free(model_buffer);
+    model_buffer = nullptr;
+    return false;
+  }
+
+  // 注册所有操作
+  static AllOpsResolver resolver;
+
+  // 内存分配 - 100KB足够小模型
+  constexpr size_t tensorArenaSize = 100000;
+  tensor_arena = (uint8_t*)heap_caps_malloc(tensorArenaSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!tensor_arena) {
+    strncpy(last_error, "malloc failed for tensor arena", sizeof(last_error)-1);
+    free(model_buffer);
+    model_buffer = nullptr;
+    return false;
+  }
+
+  // 创建错误reporter
+  static MicroErrorReporter microErrorReporter;
+  error_reporter = &microErrorReporter;
+
+  // 创建解释器
+  interpreter = new MicroInterpreter(model, resolver, tensor_arena, tensorArenaSize, error_reporter);
+  TfLiteStatus status = interpreter->AllocateTensors();
+  if (status != kTfLiteOk) {
+    strncpy(last_error, "AllocateTensors failed", sizeof(last_error)-1);
+    free(model_buffer);
+    free(tensor_arena);
+    model_buffer = nullptr;
+    tensor_arena = nullptr;
+    interpreter = nullptr;
+    return false;
+  }
+
+  model_initialized = true;
+  Serial.println("✅ TFLite模型初始化完成");
+  return true;
+}
+
+// ==================== 通过串口接收新模型，写入flash分区 ====================
+bool receiveAndWriteModel(Stream &stream, int timeoutSeconds) {
+  last_error[0] = '\0';
+  if (!model_partition) {
+    strncpy(last_error, "No model partition", sizeof(last_error)-1);
+    return false;
+  }
+
+  Serial.println("\n=== 开始接收模型数据 ===");
+  Serial.println("请从电脑发送二进制模型文件...");
+  Serial.printf("超时: %d 秒，最大: %d bytes\n", timeoutSeconds, MAX_MODEL_SIZE);
+
+  // 使用静态buffer，不占用动态内存
+  // 放在flash只读段，不占用DRAM
+  static uint8_t tempBuffer[MAX_MODEL_SIZE] __attribute__((aligned(4), section(".rodata")));
+  unsigned long start = millis();
+  size_t bytesReceived = 0;
+
+  while (millis() - start < (unsigned long)timeoutSeconds * 1000) {
+    if (stream.available()) {
+      while (stream.available() && bytesReceived < MAX_MODEL_SIZE) {
+        tempBuffer[bytesReceived] = stream.read();
+        bytesReceived++;
+        if (bytesReceived % 1024 == 0) {
+          Serial.printf("Received %zu KB...\n", bytesReceived / 1024);
+        }
+      }
+      start = millis();  // 收到数据就重置超时
+    }
+    delay(1);
+  }
+
+  Serial.printf("\n=== 接收完成 ===\n");
+  Serial.printf("Total: %zu bytes\n", bytesReceived);
+
+  if (bytesReceived == 0) {
+    strncpy(last_error, "No data received within timeout", sizeof(last_error)-1);
+    return false;
+  }
+
+  if (bytesReceived >= MAX_MODEL_SIZE) {
+    strncpy(last_error, "Model too large, increase MAX_MODEL_SIZE", sizeof(last_error)-1);
+    return false;
+  }
+
+  // 写入flash: 先擦除，再写大小，再写数据
+  size_t size = bytesReceived;
+  esp_err_t err;
+
+  err = esp_partition_erase_range(model_partition, 0, model_partition->size);
+  if (err != ESP_OK) {
+    strncpy(last_error, esp_err_to_name(err), sizeof(last_error)-1);
+    return false;
+  }
+  Serial.printf("⚡ 分区擦除完成\n");
+
+  err = esp_partition_write(model_partition, 0, &size, sizeof(size_t));
+  if (err != ESP_OK) {
+    strncpy(last_error, esp_err_to_name(err), sizeof(last_error)-1);
+    return false;
+  }
+
+  err = esp_partition_write(model_partition, sizeof(size_t), tempBuffer, bytesReceived);
+  if (err != ESP_OK) {
+    strncpy(last_error, esp_err_to_name(err), sizeof(last_error)-1);
+    return false;
+  }
+
+  Serial.printf("✅ 模型写入flash完成: %zu bytes\n", bytesReceived);
+
+  // 重新加载新模型
+  bool ok = loadModelFromFlash();
+  if (ok) {
+    Serial.println("🎉 新模型已加载并生效，无需重启！");
+  } else {
+    Serial.printf("⚠️ 新模型写入成功，但加载失败: %s\n", getLastError());
+  }
+
+  return ok;
+}
+
+// 获取最后错误
+const char* getLastError() { return last_error; }
+bool isModelInitialized() { return model_initialized; }
+
 // ==================== SD卡初始化 ====================
 bool initSD() {
   sd_spi = new SPIClass();
@@ -290,42 +532,38 @@ void modelUpgradeTask(void *arg) {
       String cmd = Serial.readStringUntil('\n');
       cmd.trim();
       if (cmd.equalsIgnoreCase("update model")) {
-        // 开始接收新模型写入flash分区
-        if (!modelMgr) {
-          Serial.println("❌ 模型管理未初始化");
-          continue;
-        }
         // 清除缓冲区，直接开始接收二进制数据
         while (Serial.available()) {
           Serial.read();
           delay(1);
         }
-        bool ok = modelMgr->receiveAndWriteModel(Serial);
+        bool ok = receiveAndWriteModel(Serial);
         if (ok) {
           Serial.println("✅ 模型接收成功！已写入flash分区，无需重启直接生效");
         } else {
-          Serial.printf("❌ 模型接收失败: %s\n", modelMgr->getLastError());
+          Serial.printf("❌ 模型接收失败: %s\n", getLastError());
         }
       } else if (cmd.equalsIgnoreCase("info model")) {
         // 查询模型信息 - 实时读取flash分区
-        if (!modelMgr) {
-          Serial.println("❌ 模型管理未初始化");
-        } else {
-          Serial.println("\n===== 模型信息 =====");
-          if (!modelMgr->hasModelPartition()) {
-            Serial.println("❌ 没有找到model分区，请检查partitions.csv");
-          } else if (modelMgr->hasModel()) {
-            Serial.printf("✅ flash分区存有模型\n");
-            Serial.printf("📦 模型大小: %zu bytes (%.1f KB)\n", 
-              modelMgr->getModelSize(), (float)modelMgr->getModelSize() / 1024);
+        Serial.println("\n===== 模型信息 =====");
+        if (!model_partition) {
+          Serial.println("❌ 没有找到model分区，请检查partitions.csv");
+        } else if (getModelSize() > 0 && getModelSize() <= MAX_MODEL_SIZE) {
+          Serial.printf("✅ flash分区存有模型\n");
+          Serial.printf("📦 模型大小: %zu bytes (%.1f KB)\n", 
+            getModelSize(), (float)getModelSize() / 1024);
+          if (model_initialized) {
+            Serial.println("✅ 模型已初始化，可以推理");
           } else {
-            Serial.println("⚠️ 分区中没有模型，使用内置模型");
-            if (modelMgr->getLastError()[0] != '\0') {
-              Serial.printf("💡 错误信息: %s\n", modelMgr->getLastError());
-            }
+            Serial.println("⚠️ 模型加载失败");
           }
-          Serial.println("====================\n");
+        } else {
+          Serial.println("⚠️ 分区中没有模型，需要发送 'update model'");
+          if (getLastError()[0] != '\0') {
+            Serial.printf("💡 错误信息: %s\n", getLastError());
+          }
         }
+        Serial.println("====================\n");
       } else if (cmd.length() > 0) {
         // 其他命令转发给发送端（ESP-NOW）
         sendCommand(cmd.c_str());
@@ -390,13 +628,21 @@ void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int
       
       // 打印推理结果
       Serial.println("\n================ 推理结果 ================");
-      Serial.printf("预测类别: %s\n", classNames[predictedClass]);
-      Serial.printf("置信度: %.1f%%\n", confidence * 100);
-      Serial.printf("新鲜度评分: %d/100\n", freshnessScore);
+      if (model_initialized) {
+        Serial.printf("预测类别: %s\n", classNames[predictedClass]);
+        Serial.printf("置信度: %.1f%%\n", confidence * 100);
+        Serial.printf("新鲜度评分: %d/100\n", freshnessScore);
+      } else {
+        Serial.println("⚠️ 模型未初始化，无法推理");
+      }
       Serial.println("========================================\n");
       
       // 记录到SD卡（带预测结果）
-      logSensorDataToSD(tmp, predictedClass, freshnessScore);
+      if (model_initialized) {
+        logSensorDataToSD(tmp, predictedClass, freshnessScore);
+      } else {
+        logSensorDataToSD(tmp);
+      }
       Serial.println("======================================\n");
     }
   }
@@ -492,22 +738,19 @@ String getStatusString(uint8_t status) {
 // ==================== 模型推理 ====================
 // 预处理输入数据
 void preprocessInput(const SensorData &data, float input[5]) {
-  // 这里使用和训练时相同的标准化
-  // 实际标准化参数会从模型加载，这里先使用原始数据
-  // 最终由tflite micro处理量化转换
+  // 使用和训练时相同的输入顺序
   input[0] = data.odor_ppm;
   input[1] = data.hcho_ppm;
   input[2] = data.co_ppm;
   input[3] = data.voc_ppm;
-  input[4] = data.co2_ppm;
+  input[4] = (float)data.co2_ppm;
 }
 
 // 运行推理，返回预测类别
 int runInference(const SensorData &data) {
-  if (!modelMgr || !modelMgr->isInitialized()) {
-    // 模型未初始化，返回默认
-    _lastConfidence = 0.0f;
-    _lastPredicted = 0;
+  if (!interpreter || !model_initialized) {
+    last_confidence = 0.0f;
+    last_predicted = 0;
     return 0;
   }
 
@@ -516,32 +759,32 @@ int runInference(const SensorData &data) {
   
   // 设置输入
   for (int i = 0; i < 5; i++) {
-    modelMgr->setInput(i, input[i]);
+    interpreter->typed_input<float>(input[i], &i);
   }
   
   // 运行推理
-  modelMgr->invoke();
+  interpreter->Invoke();
   
   // 获取输出，找到最大概率类别
   int predictedClass = 0;
   float maxProb = 0.0f;
-  int numClasses = modelMgr->getOutputSize();
-  for (int i = 0; i < numClasses; i++) {
-    float prob = modelMgr->getOutput(i);
+  int outputSize = interpreter->outputs().size;
+  for (int i = 0; i < outputSize; i++) {
+    float prob = interpreter->typed_output<float>(i);
     if (prob > maxProb) {
       maxProb = prob;
       predictedClass = i;
     }
   }
   
-  _lastConfidence = maxProb;
-  _lastPredicted = predictedClass;
+  last_confidence = maxProb;
+  last_predicted = predictedClass;
   return predictedClass;
 }
 
 // 获取最后一次推理的置信度
 float getConfidence() {
-  return _lastConfidence;
+  return last_confidence;
 }
 
 // 计算新鲜度评分：置信度 * 100，新鲜类别得分高
