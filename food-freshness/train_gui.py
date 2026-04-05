@@ -160,7 +160,9 @@ class TrainGUI:
         ttk.Entry(frame, textvariable=self.output_name, width=15).grid(row=6, column=1, padx=5, sticky=tk.W)
 
         self.train_btn = tk.Button(frame, text="开始训练", command=self.start_training, bg="#4CAF50", fg="white")
-        self.train_btn.grid(row=7, column=0, columnspan=3, pady=10)
+        self.train_btn.grid(row=7, column=0, columnspan=2, pady=10)
+        self.send_model_btn = tk.Button(frame, text="发送模型到ESP", command=self.select_and_send_model, bg="#FF9800", fg="white")
+        self.send_model_btn.grid(row=7, column=2, pady=10)
 
         # 右侧面板 - 输出和图表
         right = tk.Frame(self.root, padx=10, pady=10)
@@ -251,6 +253,35 @@ class TrainGUI:
         except Exception as e:
             messagebox.showerror("错误", f"连接失败: {str(e)}")
             self.log(f"连接失败: {str(e)}", "error")
+
+    def select_and_send_model(self):
+        """选择模型文件，发送到ESP32 SD卡升级"""
+        if not self.ser or not self.ser.is_open:
+            messagebox.showerror("错误", "串口未连接，请先连接")
+            return
+        filename = filedialog.askopenfilename(
+            title="选择模型文件发送 (.tflite / .bin)",
+            filetypes=[("Binary files", "*.tflite *.bin"), ("All files", "*.*")]
+        )
+        if not filename:
+            return
+        try:
+            file_size = os.path.getsize(filename)
+            if file_size > 128 * 1024:
+                messagebox.showerror("错误", "模型文件太大，最大支持128KB")
+                return
+            # 发送命令
+            self.ser.write(b"update model\n")
+            self.log(f"🔔 已发送 'update model' 命令，开始发送 {os.path.basename(filename)} ({file_size} bytes)...", "info")
+            # 读取并发送文件
+            with open(filename, 'rb') as f:
+                data = f.read()
+                self.ser.write(data)
+            self.log(f"✅ 发送完成，总共 {len(data)} bytes", "success")
+            self.log("⌛ 等待ESP接收完成，完成后会显示结果，重启ESP加载新模型", "info")
+        except Exception as e:
+            messagebox.showerror("错误", f"发送失败: {str(e)}")
+            self.log(f"发送失败: {str(e)}", "error")
 
     def update_status(self, text, color="black"):
         self.status_label.config(text=f"状态: {text}", foreground=color)
