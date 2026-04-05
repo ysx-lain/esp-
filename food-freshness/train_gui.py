@@ -127,8 +127,8 @@ class TrainGUI:
         ttk.Label(frame, text="开始同步").grid(row=3, column=2, padx=3, sticky=tk.W);
 
         ttk.Label(frame, text="定时(分):").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=0, to=120, textvariable=self.auto_stop_minutes_var, width=6).grid(row=4, column=1, sticky=W)
-        ttk.Label(frame, text="0=不停止").grid(row=4, column=2, padx=3, sticky=W);
+        ttk.Spinbox(frame, from_=0, to=120, textvariable=self.auto_stop_minutes_var, width=6).grid(row=4, column=1, sticky=tk.W)
+        ttk.Label(frame, text="0=不停止").grid(row=4, column=2, padx=3, sticky=tk.W);
 
         self.start_log_btn = tk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED, bg="#4CAF50", fg="white")
         self.start_log_btn.grid(row=5, column=0, columnspan=2, pady=5)
@@ -147,11 +147,11 @@ class TrainGUI:
 
         ttk.Label(frame, text="窗口大小:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=1, to=20, textvariable=self.window_size, width=6).grid(row=0, column=1, sticky=tk.W)
-        ttk.Label(frame, text="帧").grid(row=0, column=2, padx=2, sticky=W);
+        ttk.Label(frame, text="帧").grid(row=0, column=2, padx=2, sticky=tk.W);
 
         ttk.Label(frame, text="步长:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=1, to=10, textvariable=self.window_step, width=6).grid(row=1, column=1, sticky=tk.W)
-        ttk.Label(frame, text="帧").grid(row=1, column=2, padx=2, sticky=W);
+        ttk.Label(frame, text="帧").grid(row=1, column=2, padx=2, sticky=tk.W);
 
         ttk.Label(frame, text="轮数:").grid(row=2, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=10, to=300, textvariable=self.epochs, width=6).grid(row=2, column=1, sticky=tk.W)
