@@ -45,6 +45,23 @@ public:
     // 获取最后错误信息
     const char* getLastError() { return _lastError; }
 
+    // 获取模型大小（字节）
+    size_t getModelSize(const char* filename = DEFAULT_MODEL_NAME) {
+        if (!_sdInitialized) return 0;
+        File f = SD.open(filename, FILE_READ);
+        if (!f) return 0;
+        size_t size = f.size();
+        f.close();
+        return size;
+    }
+
+    // 获取模型存储路径
+    const char* getModelPath(const char* filename = DEFAULT_MODEL_NAME) {
+        static char path[64];
+        snprintf(path, sizeof(path), "/%s", filename);
+        return path;
+    }
+
 private:
     int _csPin;
     bool _sdInitialized = false;

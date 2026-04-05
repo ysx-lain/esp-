@@ -88,7 +88,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) delay(10);
   Serial.println("\n===== ESP-NOW 接收端 - 智能食材新鲜度监测 =====");
-  Serial.println("可用命令: set interval <秒>, skip warmup, status, update model");
+  Serial.println("可用命令: set interval <秒>, skip warmup, status, update model, info model");
   startTime = millis();
 
   // 初始化SD卡模型管理
@@ -150,6 +150,22 @@ void modelUpgradeTask(void *arg) {
           Serial.println("✅ 模型接收保存成功！重启后加载新模型");
         } else {
           Serial.printf("❌ 模型接收失败: %s\n", modelMgr->getLastError());
+        }
+      } else if (cmd.equalsIgnoreCase("info model")) {
+        // 查询模型信息
+        if (!modelMgr) {
+          Serial.println("❌ 模型管理未初始化");
+        } else {
+          Serial.println("\n===== 模型信息 =====");
+          if (modelMgr->hasModel()) {
+            Serial.printf("✅ SD卡有模型文件\n");
+            Serial.printf("📦 模型大小: %u bytes (%.1f KB)\n", 
+              modelMgr->getModelSize(), (float)modelMgr->getModelSize() / 1024);
+            Serial.printf("💾 存储路径: %s\n", modelMgr->getModelPath());
+          } else {
+            Serial.println("⚠️ 没有SD卡模型，使用内置模型");
+          }
+          Serial.println("====================\n");
         }
       } else if (cmd.length() > 0) {
         // 其他命令转发给发送端（ESP-NOW）
