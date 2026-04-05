@@ -357,8 +357,6 @@ void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int
     if (tmp.dataType == PKT_TYPE_SENSOR) {
       latestData = tmp;
       hasValidSensorData = true;
-      // 记录到SD卡
-      logSensorDataToSD(tmp);
       Serial.println("\n========== 接收到传感器数据 ==========");
       Serial.print("发送方 MAC: ");
       for (int i = 0; i < 6; i++) {
@@ -367,6 +365,21 @@ void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int
       }
       Serial.println();
       printSensorData();
+      
+      // 运行模型推理
+      int predictedClass = runInference(latestData);
+      float confidence = getConfidence();
+      int freshnessScore = calculateFreshnessScore(confidence, predictedClass);
+      
+      // 打印推理结果
+      Serial.println("\n================ 推理结果 ================");
+      Serial.printf("预测类别: %s\n", classNames[predictedClass]);
+      Serial.printf("置信度: %.1f%%\n", confidence * 100);
+      Serial.printf("新鲜度评分: %d/100\n", freshnessScore);
+      Serial.println("========================================\n");
+      
+      // 记录到SD卡（带预测结果）
+      logSensorDataToSD(tmp, predictedClass, freshnessScore);
       Serial.println("======================================\n");
     }
   }
