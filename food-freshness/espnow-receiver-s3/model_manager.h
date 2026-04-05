@@ -6,7 +6,7 @@
  * - 接收完成后直接生效，无需重启ESP32
  * - 需要在 partitions.csv 中添加模型分区
  * - 内置TFLite Micro推理支持
- * 适配：ESP32 Arduino 3.2.x 官方内置 TensorFlow Lite
+ * 适配：chirale/TensorFlowLite_ESP32 库
  */
 
 #ifndef MODEL_MANAGER_H
@@ -15,17 +15,9 @@
 #include <Arduino.h>
 #include <esp_partition.h>
 #include <esp_flash.h>
+#include <TensorFlowLite_ESP32.h>
 
-// ESP32 Arduino 内置 TensorFlow Lite Micro
-#include "esp_camera.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/version.h"
-
-namespace tflite {
-}
+using namespace tflite;
 
 // 默认模型最大大小 256KB足够我们的CNN模型
 #define MAX_MODEL_SIZE  (256 * 1024)
@@ -144,7 +136,7 @@ public:
         }
 
         // 初始化TensorFlow Lite Micro
-        const tflite::Model* model = tflite::GetModel(_model_buffer);
+        const Model* model = GetModel(_model_buffer);
         if (model->version() != TFLITE_SCHEMA_VERSION) {
             strncpy(_lastError, "Model schema version mismatch", sizeof(_lastError)-1);
             free(_model_buffer);
@@ -153,7 +145,7 @@ public:
         }
 
         // 注册所有操作
-        static tflite::AllOpsResolver resolver;
+        static AllOpsResolver resolver;
 
         // 内存分配
         constexpr size_t tensorArenaSize = 100000; // 100KB足够小模型
@@ -166,11 +158,11 @@ public:
         }
 
         // 创建错误reporter
-        static tflite::MicroErrorReporter microErrorReporter;
+        static MicroErrorReporter microErrorReporter;
         _error_reporter = &microErrorReporter;
 
         // 创建解释器
-        _interpreter = new tflite::MicroInterpreter(model, resolver, _tensor_arena, tensorArenaSize, _error_reporter);
+        _interpreter = new MicroInterpreter(model, resolver, _tensor_arena, tensorArenaSize, _error_reporter);
         TfLiteStatus status = _interpreter->AllocateTensors();
         if (status != kTfLiteOk) {
             strncpy(_lastError, "AllocateTensors failed", sizeof(_lastError)-1);
@@ -326,8 +318,8 @@ private:
     const esp_partition_t *_partition;
     uint8_t *_model_buffer;
     uint8_t *_tensor_arena;
-    tflite::MicroInterpreter *_interpreter;
-    tflite::MicroErrorReporter *_error_reporter;
+    MicroInterpreter *_interpreter;
+    MicroErrorReporter *_error_reporter;
     bool _initialized;
 };
 
