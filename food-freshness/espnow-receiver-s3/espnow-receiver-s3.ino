@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 适配：TensorFlow Lite Micro + ESP-NN 优化库 (chirale 2.0)
+ * 适配：Chirale TensorFlow Lite 2.0 (global namespace all types)
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,12 +18,9 @@
 #include <time.h>
 #include <Arduino.h>
 
-// Chirale TensorFlowLite 2.0
+// Chirale TensorFlowLite 2.0 - all types in global namespace
 #include <Chirale_TensorFlowLite.h>
 #include <esp_nn.h>
-
-// All tflite types are under this namespace
-using namespace tflite;
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -93,7 +90,7 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite 全局变量
+// TensorFlow Lite 全局变量 - all in global namespace
 const Model* model = nullptr;
 MicroInterpreter* interpreter = nullptr;
 alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
@@ -506,7 +503,7 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // typed_input API works in chirale 2.0
+  // chirale 2.0 supports typed_input
   for (int i = 0; i < 5; i++) {
     interpreter->typed_input<float>(input[i], &i);
   }
