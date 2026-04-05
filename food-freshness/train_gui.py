@@ -12,6 +12,7 @@
 8. 训练完成后直接发送模型文件到ESP32 SD卡升级
 9. 支持指定输出目录保存模型文件
 10.一键查询ESP端模型信息（大小、版本等）
+11.持续读取串口输出，ESP端消息实时显示在日志
 """
 
 import tkinter as tk
@@ -272,6 +273,9 @@ class TrainGUI:
             self.update_status("已连接", "green")
             self.log(f"成功连接 {port} @ {baud} baud", "success")
             self.log("采集频率将在点击开始采集时自动同步，避免频繁发送", "info")
+            # 启动串口读取线程，实时显示ESP输出
+            self.serial_reader_thread = threading.Thread(target=self.serial_reader_loop, daemon=True)
+            self.serial_reader_thread.start()
         except Exception as e:
             messagebox.showerror("错误", f"连接失败: {str(e)}")
             self.log(f"连接失败: {str(e)}", "error")
@@ -288,6 +292,21 @@ class TrainGUI:
         self.stop_log_btn.config(state=tk.DISABLED)
         self.update_status("未连接", "gray")
         self.log("已断开串口连接", "success")
+
+    def serial_reader_loop(self):
+        """持续读取串口输出，显示到日志"""
+        while self.ser and self.ser.is_open:
+            try:
+                if self.ser.in_waiting > 0:
+                    line = self.ser.readline().decode('utf-8', errors='ignore').rstrip('\r\n')
+                    if line:
+                        self.root.after(0, lambda l=line: self.log(f"ESP: {l}", "info"))
+                else:
+                    time.sleep(0.01)
+            except Exception as e:
+                if self.ser and self.ser.is_open:
+                    self.root.after(0, lambda e=e: self.log(f"串口读取错误: {e}", "error"))
+                break
 
     def select_and_send_model(self):
         """选择模型文件，发送到ESP32 SD卡升级"""
