@@ -97,6 +97,11 @@ void logSensorDataToSD(const SensorData &data);
 void addPeer(const uint8_t *mac, const char *name);
 void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len);
 void checkAllConnections();
+// 模型推理函数声明
+int runInference(const SensorData &data);
+float getConfidence();
+int calculateFreshnessScore(float confidence, int predictedClass);
+extern const char *classNames[];
 void sendCommand(const char* cmd);
 void printSensorData();
 void printWarmupStatus(const WarmupStatus &w);
