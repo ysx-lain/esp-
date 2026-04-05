@@ -6,6 +6,7 @@
  * - 接收完成后直接生效，无需重启ESP32
  * - 需要在 partitions.csv 中添加模型分区
  * - 内置TFLite Micro推理支持
+ * 适配：ESP32 Arduino 3.2.x 官方内置 TensorFlow Lite
  */
 
 #ifndef MODEL_MANAGER_H
@@ -14,6 +15,9 @@
 #include <Arduino.h>
 #include <esp_partition.h>
 #include <esp_flash.h>
+
+// ESP32 Arduino 内置 TensorFlow Lite Micro
+#include "esp_camera.h"
 #include "tensorflow/lite/micro/all_ops_resolver.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -21,7 +25,6 @@
 #include "tensorflow/lite/version.h"
 
 namespace tflite {
-  // just in case
 }
 
 // 默认模型最大大小 256KB足够我们的CNN模型
@@ -124,7 +127,7 @@ public:
             return false;
         }
 
-        // 分配模型缓冲区 - 静态分配避免fragmentation
+        // 分配模型缓冲区 - 动态分配
         _model_buffer = (uint8_t*)heap_caps_malloc(storedSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!_model_buffer) {
             strncpy(_lastError, "malloc failed for model buffer", sizeof(_lastError)-1);
