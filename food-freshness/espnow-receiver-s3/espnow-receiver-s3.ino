@@ -18,13 +18,8 @@
 #include <time.h>
 #include <Arduino.h>
 
-// tanakamasayuki/Arduino_TensorFlowLite_ESP32 - correct entry header
+// tanakamasayuki/Arduino_TensorFlowLite_ESP32 - all includes handled by main header
 #include "TensorFlowLite_ESP32.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/version.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -94,7 +89,7 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite - tanakamasayuki version uses tflite namespace
+// TensorFlow Lite - all types already in tflite namespace via main header
 namespace {
   tflite::MicroErrorReporter micro_error_reporter;
   tflite::AllOpsResolver resolver;
@@ -507,7 +502,7 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // tanakamasayuki version supports typed_input
+  // typed_input supported in this version
   for (int i = 0; i < 5; i++) {
     interpreter->typed_input<float>(input[i], &i);
   }
