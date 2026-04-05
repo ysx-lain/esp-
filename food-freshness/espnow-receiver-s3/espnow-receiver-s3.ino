@@ -89,7 +89,7 @@ File data_file;
 
 // ==================== 函数声明 ====================
 bool initSD();
-void logSensorDataToSD(const SensorData &data);
+void logSensorDataToSD(const SensorData &data, int pred_class = -1, float freshness = -1);
 void addPeer(const uint8_t *mac, const char *name);
 void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len);
 void checkAllConnections();
@@ -127,14 +127,32 @@ void setup() {
   // 初始化SD卡 - 存储传感器历史数据
   if (initSD()) {
     Serial.println("✅ SD卡初始化完成，传感器数据将记录到SD");
-    // 创建日志文件
-    char filename[32];
-    snprintf(filename, sizeof(filename), "/sensor_log_%s.csv", 
-      WiFi.macAddress().c_str());
+    
+    // 确保test文件夹存在
+    if (!SD.exists("/test")) {
+      SD.mkdir("/test");
+      Serial.println("📁 创建test文件夹");
+    }
+
+    // 创建日志文件 - test/device_mac_YYYYMMDD_HHMM.csv
+    char filename[64];
+    // 获取当前时间如果有RTC，这里简单用开机时间戳
+    unsigned long unixTime = time(NULL);
+    if (unixTime > 1000000000) {
+      // 如果有RTC设置了时间，用日期命名
+      struct tm *tm;
+      tm = gmtime(&unixTime);
+      snprintf(filename, sizeof(filename), "/test/sensor_log_%04d%02d%02d_%02d%02d.csv", 
+        tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min);
+    } else {
+      // 否则用MAC+开机毫秒
+      snprintf(filename, sizeof(filename), "/test/sensor_log_%s_%lu.csv", 
+        WiFi.macAddress().c_str(), millis());
+    }
     data_file = SD.open(filename, FILE_WRITE);
     if (data_file) {
-      // 写入CSV头
-      data_file.println("timestamp,odor_ppm,hcho_ppm,co_ppm,voc_ppm,co2_ppm,co2_temp,env_temp,humidity,sensor_status");
+      // 写入CSV头 - 包含预测字段
+      data_file.println("timestamp,odor_ppm,hcho_ppm,co_ppm,voc_ppm,co2_ppm,co2_temp,env_temp,humidity,sensor_status,prediction_class,freshness_score");
       data_file.flush();
       Serial.printf("📝 日志文件创建: %s\n", filename);
     } else {
@@ -189,23 +207,42 @@ bool initSD() {
 }
 
 // ==================== 记录传感器数据到SD卡 ====================
-void logSensorDataToSD(const SensorData &data) {
+// 需要推理后调用，预测结果一起写入
+void logSensorDataToSD(const SensorData &data, int pred_class = -1, float freshness = -1) {
   if (!sd_ready || !data_file) {
     return;
   }
-  // CSV格式: timestamp,odor,hcho,co,voc,co2,co2_temp,temp,humidity,status
-  data_file.printf("%u,%.2f,%.2f,%.2f,%.2f,%u,%d,%.2f,%.2f,%u\n",
-    data.timestamp,
-    data.odor_ppm,
-    data.hcho_ppm,
-    data.co_ppm,
-    data.voc_ppm,
-    data.co2_ppm,
-    data.co2_temp,
-    data.env_temp,
-    data.humidity,
-    data.sensor_status
-  );
+  // CSV格式: timestamp,odor,hcho,co,voc,co2,co2_temp,temp,humidity,status,prediction,freshness
+  if (pred_class >= 0) {
+    data_file.printf("%u,%.2f,%.2f,%.2f,%.2f,%u,%d,%.2f,%.2f,%u,%d,%.2f\n",
+      data.timestamp,
+      data.odor_ppm,
+      data.hcho_ppm,
+      data.co_ppm,
+      data.voc_ppm,
+      data.co2_ppm,
+      data.co2_temp,
+      data.env_temp,
+      data.humidity,
+      data.sensor_status,
+      pred_class,
+      freshness
+    );
+  } else {
+    // 没有预测结果时只存原始数据
+    data_file.printf("%u,%.2f,%.2f,%.2f,%.2f,%u,%d,%.2f,%.2f,%u,,\n",
+      data.timestamp,
+      data.odor_ppm,
+      data.hcho_ppm,
+      data.co_ppm,
+      data.voc_ppm,
+      data.co2_ppm,
+      data.co2_temp,
+      data.env_temp,
+      data.humidity,
+      data.sensor_status
+    );
+  }
   // 定期flush确保数据写入
   if (data_file.position() > 4096) {
     data_file.flush();
