@@ -1,6 +1,7 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
  * 适配 tanakamasayuki/Arduino_TensorFlowLite_ESP32 版本
+ * 所有类型在全局命名空间
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,7 +19,7 @@
 #include <time.h>
 #include <Arduino.h>
 
-// tanakamasayuki/Arduino_TensorFlowLite_ESP32 - all includes handled by main header
+// tanakamasayuki/Arduino_TensorFlowLite_ESP32 - all types in global namespace
 #include "TensorFlowLite_ESP32.h"
 
 // ==================== 数据结构（与发送端一致） ====================
@@ -89,13 +90,13 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite - all types already in tflite namespace via main header
+// TensorFlow Lite - all types in global namespace
 namespace {
-  tflite::MicroErrorReporter micro_error_reporter;
-  tflite::AllOpsResolver resolver;
+  MicroErrorReporter micro_error_reporter;
+  AllOpsResolver resolver;
 
-  const tflite::Model* model;
-  tflite::MicroInterpreter* interpreter;
+  const Model* model;
+  MicroInterpreter* interpreter;
   alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
 }
 
@@ -258,14 +259,14 @@ bool loadModelFromSD() {
   }
 
   // 初始化TFLite
-  model = tflite::GetModel(model_buffer);
+  model = GetModel(model_buffer);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.println("❌ Schema version mismatch");
     free(model_buffer);
     return false;
   }
 
-  static tflite::MicroInterpreter static_interpreter(
+  static MicroInterpreter static_interpreter(
     model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
   interpreter = &static_interpreter;
 
@@ -502,7 +503,6 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // typed_input supported in this version
   for (int i = 0; i < 5; i++) {
     interpreter->typed_input<float>(input[i], &i);
   }
