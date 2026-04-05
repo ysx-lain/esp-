@@ -45,7 +45,7 @@ class TrainGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("食材新鲜度检测 - 一体化训练工具")
-        self.root.geometry("1200x800")
+        self.root.geometry("1280x800")
 
         # 变量
         self.ser = None
@@ -86,7 +86,7 @@ class TrainGUI:
 
     def create_widgets(self):
         # 左侧面板 - 设置
-        left = tk.Frame(self.root, width=350, padx=10, pady=10)
+        left = tk.Frame(self.root, width=380, padx=10, pady=10)
         left.pack(side=tk.LEFT, fill=tk.Y)
         left.pack_propagate(False)
 
@@ -119,15 +119,15 @@ class TrainGUI:
 
         ttk.Label(frame, text="当前标签:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Entry(frame, textvariable=self.label_text, width=20).grid(row=1, column=1, columnspan=2, padx=5, sticky=tk.W)
-        ttk.Label(frame, text="格式: category_freshness").grid(row=2, column=1, columnspan=2, sticky=tk.W)
+        ttk.Label(frame, text="格式: cat_fresh").grid(row=2, column=1, columnspan=2, sticky=tk.W)
 
-        ttk.Label(frame, text="采集频率(秒):").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=2, to=60, textvariable=self.sample_interval, width=8).grid(row=3, column=1, sticky=tk.W)
-        ttk.Label(frame, text="开始采集时自动同步").grid(row=3, column=2, padx=5);
+        ttk.Label(frame, text="间隔(秒):").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=2, to=60, textvariable=self.sample_interval, width=6).grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame, text="开始同步").grid(row=3, column=2, padx=3, sticky=tk.W);
 
-        ttk.Label(frame, text="自动停止(分钟):").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=0, to=120, textvariable=self.auto_stop_minutes_var, width=8).grid(row=4, column=1, sticky=tk.W)
-        ttk.Label(frame, text="0=不停止, 从第一包计时").grid(row=4, column=2, sticky=tk.W);
+        ttk.Label(frame, text="定时(分):").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=0, to=120, textvariable=self.auto_stop_minutes_var, width=6).grid(row=4, column=1, sticky=tk.W)
+        ttk.Label(frame, text="0=不停止").grid(row=4, column=2, padx=3, sticky=tk.W);
 
         self.start_log_btn = tk.Button(frame, text="开始采集", command=self.start_logging, state=tk.DISABLED, bg="#4CAF50", fg="white")
         self.start_log_btn.grid(row=5, column=0, columnspan=2, pady=5)
@@ -144,23 +144,25 @@ class TrainGUI:
         frame = tk.LabelFrame(left, text="训练参数", padx=5, pady=5)
         frame.pack(fill=tk.X, pady=(0,10))
 
-        ttk.Label(frame, text="滑动窗口大小:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=1, to=20, textvariable=self.window_size, width=8).grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(frame, text="窗口大小:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=1, to=20, textvariable=self.window_size, width=6).grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(frame, text="帧").grid(row=0, column=2, padx=2, sticky=tk.W);
 
-        ttk.Label(frame, text="滑动步长:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=1, to=10, textvariable=self.window_step, width=8).grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame, text="步长:").grid(row=1, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=1, to=10, textvariable=self.window_step, width=6).grid(row=1, column=1, sticky=tk.W)
+        ttk.Label(frame, text="帧").grid(row=1, column=2, padx=2, sticky=tk.W);
 
-        ttk.Label(frame, text="训练轮数:").grid(row=2, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=10, to=300, textvariable=self.epochs, width=8).grid(row=2, column=1, sticky=tk.W)
+        ttk.Label(frame, text="轮数:").grid(row=2, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=10, to=300, textvariable=self.epochs, width=6).grid(row=2, column=1, sticky=tk.W)
 
-        ttk.Label(frame, text="批次大小:").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=8, to=128, textvariable=self.batch_size, width=8).grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(frame, text="批次:").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=8, to=128, textvariable=self.batch_size, width=6).grid(row=3, column=1, sticky=tk.W)
 
-        ttk.Label(frame, text="学习率:").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=0.0001, to=0.01, textvariable=self.learning_rate, width=8, increment=0.0001).grid(row=4, column=1, sticky=tk.W)
+        ttk.Label(frame, text="LR:").grid(row=4, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=0.0001, to=0.01, textvariable=self.learning_rate, width=6, increment=0.0001).grid(row=4, column=1, sticky=tk.W)
 
-        ttk.Label(frame, text="Dropout:").grid(row=5, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Spinbox(frame, from_=0.1, to=0.5, textvariable=self.dropout, width=8, increment=0.05).grid(row=5, column=1, sticky=tk.W)
+        ttk.Label(frame, text="Drop:").grid(row=5, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Spinbox(frame, from_=0.1, to=0.5, textvariable=self.dropout, width=6).grid(row=5, column=1, sticky=tk.W)
 
         ttk.Label(frame, text="输出目录:").grid(row=6, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Entry(frame, textvariable=self.output_dir, width=12).grid(row=6, column=1, padx=5, sticky=tk.W)
