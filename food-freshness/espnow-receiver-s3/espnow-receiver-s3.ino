@@ -18,12 +18,12 @@
 #include <time.h>
 #include <Arduino.h>
 
-// TensorFlow Lite for Microcontrollers - chirale library correct paths
+// TensorFlow Lite for Microcontrollers - chirale library correct includes
 #include <TensorFlowLite_ESP32.h>
-#include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
+#include <tensorflow/lite/micro/all_ops_resolver.h>
+#include <tensorflow/lite/micro/micro_error_reporter.h>
+#include <tensorflow/lite/micro/micro_interpreter.h>
+#include <tensorflow/lite/schema/schema_generated.h>
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -94,15 +94,11 @@ PeerMonitor peers[4];
 int peerCount = 0;
 
 // TensorFlow Lite 全局变量
-namespace tflite {
-}
-using namespace tflite;
-
-AllOpsResolver resolver;
-MicroErrorReporter micro_error_reporter;
-const Model* model;
+tflite::AllOpsResolver resolver;
+tflite::MicroErrorReporter micro_error_reporter;
+const tflite::Model* model;
 uint8_t tensor_arena[TENSOR_ARENA_SIZE];
-MicroInterpreter* interpreter;
+tflite::MicroInterpreter* interpreter;
 bool model_loaded = false;
 
 // 推理结果缓存
@@ -262,14 +258,14 @@ bool loadModelFromSD() {
   }
 
   // 初始化TFLite
-  model = GetModel(model_buffer);
+  model = tflite::GetModel(model_buffer);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.println("❌ Schema version mismatch");
     free(model_buffer);
     return false;
   }
 
-  interpreter = new MicroInterpreter(model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
+  interpreter = new tflite::MicroInterpreter(model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
   TfLiteStatus status = interpreter->AllocateTensors();
   if (status != kTfLiteOk) {
     Serial.println("❌ AllocateTensors failed");
