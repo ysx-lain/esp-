@@ -17,6 +17,13 @@
 #include <esp_flash.h>
 #include "TensorFlowLite_ESP32.h"
 
+// TensorFlow Lite Micro headers provided by the library
+#include "all_ops_resolver.h"
+#include "micro_error_reporter.h"
+#include "micro_interpreter.h"
+#include "schema/schema_generated.h"
+#include "version.h"
+
 // 默认模型最大大小 256KB足够我们的CNN模型
 #define MAX_MODEL_SIZE  (256 * 1024)
 
@@ -317,7 +324,7 @@ private:
     uint8_t *_model_buffer;
     uint8_t *_tensor_arena;
     MicroInterpreter *_interpreter;
-    ErrorReporter *_error_reporter;
+    MicroErrorReporter *_error_reporter;
     bool _initialized;
 };
 
