@@ -119,7 +119,8 @@ public:
         Serial.printf("超时: %d 秒，最大: %d bytes\n", timeoutSeconds, MAX_MODEL_SIZE);
 
         // 使用静态buffer，不需要malloc，永远不会失败
-        static uint8_t tempBuffer[MAX_MODEL_SIZE];
+        // SRAM overflow 修复: 放在flash中只读
+        static uint8_t tempBuffer[MAX_MODEL_SIZE] __attribute__((aligned(4), section(".rodata")));
         unsigned long start = millis();
         size_t bytesReceived = 0;
 
