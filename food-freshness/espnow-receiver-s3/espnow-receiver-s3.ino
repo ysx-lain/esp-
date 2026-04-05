@@ -310,10 +310,10 @@ void serialTask(void *arg) {
       cmd.trim();
       if (cmd.equalsIgnoreCase("info model")) {
         Serial.println("\n===== 模型信息 =====");
-        if (model_loaded) {
+        if (model_loaded && interpreter) {
           Serial.println("✅ Model loaded");
-          int input_size = interpreter->inputs()->size();
-          int output_size = interpreter->outputs()->size();
+          int input_size = interpreter->inputs().size();
+          int output_size = interpreter->outputs().size();
           Serial.printf("  Input size: %d\n", input_size);
           Serial.printf("  Output size: %d\n", output_size);
         } else {
@@ -512,7 +512,6 @@ int runInference(const SensorData &data) {
   int predictedClass = 0;
   float maxProb = 0.0f;
   TfLiteTensor* output_tensor = interpreter->output(0);
-  int outputSize = output_tensor->dims->size;
   // 实际output数组大小就是类别数
   for (int i = 0; i < numClasses; i++) {
     float prob = output_tensor->data.f[i];
