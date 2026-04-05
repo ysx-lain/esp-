@@ -3,10 +3,15 @@
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时在串口打印接收的数据（多行人类可读格式）
- * - 支持串口命令转发（set interval, skip warmup, status, update model）
+ * - SD卡存储传感器历史数据（CSV格式）
+ * - 支持串口命令转发（set interval, skip warmup, status, update model, info model）
  * - 连接状态检测（带防抖）
  * - 支持flash自定义分区模型OTA升级，第二核心后台处理，ESP-NOW不受影响
  * - 接收完成直接生效，无需重启ESP32
+ *
+ * 分工：
+ * - 模型 → flash自定义分区（256KB），读取快，无需重启
+ * - 传感器历史数据 → SD卡存储（CSV格式）
  */
 
 #include <esp_now.h>
@@ -54,6 +59,12 @@ const unsigned long CONNECTION_TIMEOUT = 45000;
 const unsigned long STARTUP_GRACE = 120000;
 const int OFFLINE_CONFIRM_COUNT = 2;
 
+// SD卡配置 - SPI引脚
+#define SD_SCK  12
+#define SD_MISO 14
+#define SD_MOSI 13
+#define SD_CS   15
+
 unsigned long startTime = 0;
 SensorData latestData;
 bool hasValidSensorData = false;
@@ -71,7 +82,14 @@ int peerCount = 0;
 // 模型管理 - 使用flash自定义分区存储模型
 ModelManager *modelMgr = nullptr;
 
+// SD卡 - 存储传感器历史数据
+SPIClass *sd_spi = nullptr;
+bool sd_ready = false;
+File data_file;
+
 // ==================== 函数声明 ====================
+bool initSD();
+void logSensorDataToSD(const SensorData &data);
 void addPeer(const uint8_t *mac, const char *name);
 void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len);
 void checkAllConnections();
@@ -104,10 +122,31 @@ void setup() {
       Serial.println("⚠️ 分区中没有找到模型，使用内置模型");
       Serial.println("发送 'update model' 开始串口升级模型");
     }
-    // 启动第二核心处理模型升级，ESP-NOW在Core 0运行互不干扰
-    xTaskCreatePinnedToCore(modelUpgradeTask, "modelUpgrade", 16384, NULL, 1, NULL, 1);
-    Serial.println("✅ 模型升级任务已在Core 1启动，ESP-NOW不受影响");
   }
+
+  // 初始化SD卡 - 存储传感器历史数据
+  if (initSD()) {
+    Serial.println("✅ SD卡初始化完成，传感器数据将记录到SD");
+    // 创建日志文件
+    char filename[32];
+    snprintf(filename, sizeof(filename), "/sensor_log_%s.csv", 
+      WiFi.macAddress().c_str());
+    data_file = SD.open(filename, FILE_WRITE);
+    if (data_file) {
+      // 写入CSV头
+      data_file.println("timestamp,odor_ppm,hcho_ppm,co_ppm,voc_ppm,co2_ppm,co2_temp,env_temp,humidity,sensor_status");
+      data_file.flush();
+      Serial.printf("📝 日志文件创建: %s\n", filename);
+    } else {
+      Serial.println("⚠️ 无法创建日志文件，数据不会记录");
+    }
+  } else {
+    Serial.println("⚠️ SD卡初始化失败，传感器数据不会记录到SD");
+  }
+
+  // 启动第二核心处理模型升级，ESP-NOW在Core 0运行互不干扰
+  xTaskCreatePinnedToCore(modelUpgradeTask, "modelUpgrade", 16384, NULL, 1, NULL, 1);
+  Serial.println("✅ 模型升级任务已在Core 1启动，ESP-NOW不受影响");
 
   WiFi.mode(WIFI_STA);
   if (esp_now_init() != ESP_OK) {
@@ -131,6 +170,46 @@ void setup() {
   Serial.print("本机 MAC: ");
   Serial.println(WiFi.macAddress());
   Serial.println("等待数据...");
+}
+
+// ==================== SD卡初始化 ====================
+bool initSD() {
+  sd_spi = new SPIClass();
+  sd_spi->begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  if (!SD.begin(SD_CS, *sd_spi)) {
+    sd_ready = false;
+    return false;
+  }
+
+  sd_ready = true;
+  return true;
+}
+
+// ==================== 记录传感器数据到SD卡 ====================
+void logSensorDataToSD(const SensorData &data) {
+  if (!sd_ready || !data_file) {
+    return;
+  }
+  // CSV格式: timestamp,odor,hcho,co,voc,co2,co2_temp,temp,humidity,status
+  data_file.printf("%u,%.2f,%.2f,%.2f,%.2f,%u,%d,%.2f,%.2f,%u\n",
+    data.timestamp,
+    data.odor_ppm,
+    data.hcho_ppm,
+    data.co_ppm,
+    data.voc_ppm,
+    data.co2_ppm,
+    data.co2_temp,
+    data.env_temp,
+    data.humidity,
+    data.sensor_status
+  );
+  // 定期flush确保数据写入
+  if (data_file.position() > 4096) {
+    data_file.flush();
+  }
 }
 
 // ==================== 模型升级任务（运行在Core 1） ====================
@@ -219,6 +298,8 @@ void onReceive(const esp_now_recv_info_t *info, const uint8_t *incomingData, int
     if (tmp.dataType == PKT_TYPE_SENSOR) {
       latestData = tmp;
       hasValidSensorData = true;
+      // 记录到SD卡
+      logSensorDataToSD(tmp);
       Serial.println("\n========== 接收到传感器数据 ==========");
       Serial.print("发送方 MAC: ");
       for (int i = 0; i < 6; i++) {
