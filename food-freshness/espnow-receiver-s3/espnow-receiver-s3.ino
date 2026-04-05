@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 完全按照 chirale/TensorFlowLite_ESP32 官方示例写法
+ * 完全按照 chirale/TensorFlowLite_ESP32 官方示例最简洁写法
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,15 +18,10 @@
 #include <time.h>
 #include <Arduino.h>
 
-// TensorFlow Lite for Microcontrollers - Chirale ESP32 version
-#include "TensorFlowLite_ESP32.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/version.h"
+// 官方示例只需要这一个头文件，它已经包含了所有需要的东西
+#include <TensorFlowLite_ESP32.h>
 
-#include <esp_nn.h>
+#include "esp_nn.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -96,15 +91,16 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite 全局变量 - 完全按照官方示例
-namespace tflite {
-  static tflite::MicroErrorReporter micro_error_reporter;
-  static tflite::AllOpsResolver all_ops_resolver;
+// TensorFlow Lite - 官方写法
+namespace {
+  tflite::MicroErrorReporter micro_error_reporter;
+  tflite::AllOpsResolver resolver;
+
+  const tflite::Model* model;
+  tflite::MicroInterpreter* interpreter;
+  uint8_t tensor_arena[TENSOR_ARENA_SIZE] __attribute__((aligned(16)));
 }
 
-const tflite::Model* model = nullptr;
-tflite::MicroInterpreter* interpreter = nullptr;
-alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
 bool model_loaded = false;
 
 // 推理结果缓存
@@ -263,7 +259,7 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // 初始化TFLite - 官方写法
+  // 官方写法
   model = tflite::GetModel(model_buffer);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.println("❌ Schema version mismatch");
@@ -271,9 +267,8 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // 静态分配解释器
   static tflite::MicroInterpreter static_interpreter(
-    model, &tflite::all_ops_resolver, tensor_arena, TENSOR_ARENA_SIZE, &tflite::micro_error_reporter);
+    model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
   interpreter = &static_interpreter;
 
   TfLiteStatus status = interpreter->AllocateTensors();
@@ -512,7 +507,6 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // chirale 2.0 supports typed_input
   for (int i = 0; i < 5; i++) {
     interpreter->typed_input<float>(input[i], &i);
   }
