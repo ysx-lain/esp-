@@ -18,12 +18,12 @@
 #include <time.h>
 #include <Arduino.h>
 
-// TensorFlow Lite for Microcontrollers - chirale library
+// TensorFlow Lite for Microcontrollers - chirale library correct paths
 #include <TensorFlowLite_ESP32.h>
-#include "all_ops_resolver.h"
-#include "micro_error_reporter.h"
-#include "micro_interpreter.h"
-#include "schema/schema_generated.h"
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -93,7 +93,7 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite 全局变量 - 适配chirale库
+// TensorFlow Lite 全局变量
 namespace tflite {
 }
 using namespace tflite;
