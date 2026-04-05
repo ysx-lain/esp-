@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 适配：chirale/TensorFlowLite_ESP32 2.0 版本
+ * 适配：chirale/TensorFlowLite_ESP32 2.0 版本（正确头文件）
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,8 +18,8 @@
 #include <time.h>
 #include <Arduino.h>
 
-// TensorFlowLite_ESP32 2.0 correct includes
-#include <TensorFlowLite_ESP32.h>
+// Chirale TensorFlowLite 2.0 correct include
+#include <Chirale_TensorFlowLite.h>
 #include "tensorflow/lite/micro/all_ops_resolver.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -94,11 +94,11 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite 全局变量 - 2.0 version all in namespace tflite
+// TensorFlow Lite 全局变量 - all in namespace tflite
 tflite::AllOpsResolver resolver;
 tflite::MicroErrorReporter micro_error_reporter;
 const tflite::Model* model;
-uint8_t tensor_arena[TENSOR_ARENA_SIZE];
+alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
 tflite::MicroInterpreter* interpreter;
 bool model_loaded = false;
 
@@ -501,7 +501,7 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // TFLite 2.0 API: typed_input works correctly now
+  // Chirale 2.0 supports typed_input
   for (int i = 0; i < 5; i++) {
     interpreter->typed_input<float>(input[i], &i);
   }
