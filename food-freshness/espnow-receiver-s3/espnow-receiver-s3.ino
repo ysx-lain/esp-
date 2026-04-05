@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 适配：Chirale TensorFlow Lite 2.0 (global namespace all types)
+ * 完全按照 chirale/TensorFlowLite_ESP32 官方示例写法
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,8 +18,14 @@
 #include <time.h>
 #include <Arduino.h>
 
-// Chirale TensorFlowLite 2.0 - all types in global namespace
-#include <Chirale_TensorFlowLite.h>
+// TensorFlow Lite for Microcontrollers - Chirale ESP32 version
+#include "TensorFlowLite_ESP32.h"
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+#include "tensorflow/lite/version.h"
+
 #include <esp_nn.h>
 
 // ==================== 数据结构（与发送端一致） ====================
@@ -90,12 +96,15 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite 全局变量 - all in global namespace
-const Model* model = nullptr;
-MicroInterpreter* interpreter = nullptr;
+// TensorFlow Lite 全局变量 - 完全按照官方示例
+namespace tflite {
+  static tflite::MicroErrorReporter micro_error_reporter;
+  static tflite::AllOpsResolver all_ops_resolver;
+}
+
+const tflite::Model* model = nullptr;
+tflite::MicroInterpreter* interpreter = nullptr;
 alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
-AllOpsResolver resolver;
-MicroErrorReporter micro_error_reporter;
 bool model_loaded = false;
 
 // 推理结果缓存
@@ -254,17 +263,17 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // 初始化TFLite
-  model = GetModel(model_buffer);
+  // 初始化TFLite - 官方写法
+  model = tflite::GetModel(model_buffer);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.println("❌ Schema version mismatch");
     free(model_buffer);
     return false;
   }
 
-  // 静态分配解释器 - 官方写法
-  static MicroInterpreter static_interpreter(
-    model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
+  // 静态分配解释器
+  static tflite::MicroInterpreter static_interpreter(
+    model, &tflite::all_ops_resolver, tensor_arena, TENSOR_ARENA_SIZE, &tflite::micro_error_reporter);
   interpreter = &static_interpreter;
 
   TfLiteStatus status = interpreter->AllocateTensors();
