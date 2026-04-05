@@ -391,6 +391,10 @@ class TrainGUI:
         while self.is_logging and self.auto_stop_minutes > 0:
             if not self.is_logging:
                 break  # 已经手动停止采集，直接退出
+            if not self.first_block_received:
+                # 还没收到第一包，不计时
+                time.sleep(1)
+                continue
             elapsed_min = (time.time() - self.timer_start_time) / 60.0
             remaining = self.auto_stop_minutes - elapsed_min
             if remaining <= 0:
