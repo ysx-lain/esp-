@@ -152,18 +152,21 @@ void modelUpgradeTask(void *arg) {
           Serial.printf("❌ 模型接收失败: %s\n", modelMgr->getLastError());
         }
       } else if (cmd.equalsIgnoreCase("info model")) {
-        // 查询模型信息
+        // 查询模型信息 - 实时检查SD卡
         if (!modelMgr) {
           Serial.println("❌ 模型管理未初始化");
         } else {
           Serial.println("\n===== 模型信息 =====");
           if (modelMgr->hasModel()) {
             Serial.printf("✅ SD卡有模型文件\n");
-            Serial.printf("📦 模型大小: %u bytes (%.1f KB)\n", 
+            Serial.printf("📦 模型大小: %zu bytes (%.1f KB)\n", 
               modelMgr->getModelSize(), (float)modelMgr->getModelSize() / 1024);
             Serial.printf("💾 存储路径: %s\n", modelMgr->getModelPath());
           } else {
             Serial.println("⚠️ 没有SD卡模型，使用内置模型");
+            if (modelMgr->getLastError()[0] != '\0') {
+              Serial.printf("💡 错误信息: %s\n", modelMgr->getLastError());
+            }
           }
           Serial.println("====================\n");
         }
