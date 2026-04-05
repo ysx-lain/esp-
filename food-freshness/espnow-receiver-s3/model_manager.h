@@ -15,11 +15,7 @@
 #include <esp_partition.h>
 #include <esp_flash.h>
 #include "TensorFlowLite_ESP32.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/version.h"
+// TensorFlowLite_ESP32 already includes all the required headers
 
 // 默认模型最大大小 256KB足够我们的CNN模型
 #define MAX_MODEL_SIZE  (256 * 1024)
