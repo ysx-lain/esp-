@@ -90,6 +90,10 @@ SPIClass *sd_spi = nullptr;
 bool sd_ready = false;
 File data_file;
 
+// 推理结果缓存
+float _lastConfidence = 0.0f;
+int _lastPredicted = 0;
+
 // ==================== 函数声明 ====================
 bool initSD();
 void logSensorDataToSD(const SensorData &data, int pred_class, float freshness);
@@ -101,7 +105,15 @@ void checkAllConnections();
 int runInference(const SensorData &data);
 float getConfidence();
 int calculateFreshnessScore(float confidence, int predictedClass);
-extern const char *classNames[];
+
+// 类别名称 - 根据训练时的类别顺序定义
+// 如果你的类别不同，请修改这里
+const char *classNames[] = {
+  "apple_fresh",
+  "apple_stale",
+  "apple_rotten",
+  // 添加更多类别...
+};
 void sendCommand(const char* cmd);
 void printSensorData();
 void printWarmupStatus(const WarmupStatus &w);
@@ -475,4 +487,65 @@ String getStatusString(uint8_t status) {
   if (status & STATUS_BME680_OK) s += "BME680 ";
   if (s.length() == 0) s = "None";
   return s;
+}
+
+// ==================== 模型推理 ====================
+// 预处理输入数据
+void preprocessInput(const SensorData &data, float input[5]) {
+  // 这里使用和训练时相同的标准化
+  // 实际标准化参数会从模型加载，这里先使用原始数据
+  // 最终由tflite micro处理量化转换
+  input[0] = data.odor_ppm;
+  input[1] = data.hcho_ppm;
+  input[2] = data.co_ppm;
+  input[3] = data.voc_ppm;
+  input[4] = data.co2_ppm;
+}
+
+// 运行推理，返回预测类别
+int runInference(const SensorData &data) {
+  float input[5];
+  preprocessInput(data, input);
+  
+  // 设置输入
+  for (int i = 0; i < 5; i++) {
+    modelMgr->setInput(i, input[i]);
+  }
+  
+  // 运行推理
+  modelMgr->invoke();
+  
+  // 获取输出，找到最大概率类别
+  int predictedClass = 0;
+  float maxProb = 0.0f;
+  int numClasses = modelMgr->getOutputSize();
+  for (int i = 0; i < numClasses; i++) {
+    float prob = modelMgr->getOutput(i);
+    if (prob > maxProb) {
+      maxProb = prob;
+      predictedClass = i;
+    }
+  }
+  
+  _lastConfidence = maxProb;
+  _lastPredicted = predictedClass;
+  return predictedClass;
+}
+
+// 获取最后一次推理的置信度
+float getConfidence() {
+  return _lastConfidence;
+}
+
+// 计算新鲜度评分：置信度 * 100，新鲜类别得分高
+int calculateFreshnessScore(float confidence, int predictedClass) {
+  // 如果是新鲜类别，得分 = 置信度 * 100
+  // 如果是不新鲜，得分 = 置信度 * (100 - 基分)，这里简单处理
+  // 可以根据你的类别顺序调整，假设第一个类别是新鲜，后续是不同程度不新鲜
+  int baseScore = (int)(confidence * 100);
+  // predictedClass越大，新鲜度越低
+  int score = baseScore - predictedClass * 20;
+  if (score < 0) score = 0;
+  if (score > 100) score = 100;
+  return score;
 }
