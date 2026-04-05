@@ -132,10 +132,12 @@ void setup() {
   if (initSD()) {
     Serial.println("✅ SD卡初始化完成，传感器数据将记录到SD");
     
-    // 确保test文件夹存在
-    if (!SD.exists("/test")) {
-      SD.mkdir("/test");
-      Serial.println("📁 创建test文件夹");
+    // SD卡已挂载，确保test文件夹存在
+    bool testDirExists = SD.exists("/test");
+    Serial.printf("📁 test文件夹 exists: %d\n", testDirExists);
+    if (!testDirExists) {
+      bool ok = SD.mkdir("/test");
+      Serial.printf("📁 创建test文件夹 [%d]\n", ok);
     }
 
     // 创建日志文件 - test/device_mac_YYYYMMDD_HHMM.csv
@@ -153,14 +155,15 @@ void setup() {
       snprintf(filename, sizeof(filename), "/test/sensor_log_%s_%lu.csv", 
         WiFi.macAddress().c_str(), (unsigned long)millis());
     }
+    Serial.printf("📝 尝试创建文件: %s\n", filename);
     data_file = SD.open(filename, FILE_WRITE);
     if (data_file) {
       // 写入CSV头 - 包含预测字段
       data_file.println("timestamp,odor_ppm,hcho_ppm,co_ppm,voc_ppm,co2_ppm,co2_temp,env_temp,humidity,sensor_status,prediction_class,freshness_score");
       data_file.flush();
-      Serial.printf("📝 日志文件创建: %s\n", filename);
+      Serial.printf("✅ 日志文件创建成功: %s\n", filename);
     } else {
-      Serial.println("⚠️ 无法创建日志文件，数据不会记录");
+      Serial.printf("⚠️ 无法创建日志文件 [%s], 数据不会记录\n", filename);
     }
   } else {
     Serial.println("⚠️ SD卡初始化失败，传感器数据不会记录到SD");
