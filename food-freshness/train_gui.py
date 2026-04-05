@@ -11,6 +11,7 @@
 7. 移除自动刷新串口，避免爆发式采集问题
 8. 训练完成后直接发送模型文件到ESP32 SD卡升级
 9. 支持指定输出目录保存模型文件
+10.一键查询ESP端模型信息（大小、版本等）
 """
 
 import tkinter as tk
@@ -173,6 +174,10 @@ class TrainGUI:
         self.send_model_btn = tk.Button(frame, text="发送模型到ESP", command=self.select_and_send_model, bg="#FF9800", fg="white")
         self.send_model_btn.grid(row=8, column=2, pady=10)
 
+        # 模型查询按钮
+        self.check_model_btn = tk.Button(frame, text="查看模型信息", command=self.check_model_info, bg="#9C27B0", fg="white")
+        self.check_model_btn.grid(row=9, column=0, columnspan=3, pady=5)
+
         # 右侧面板 - 输出和图表
         right = tk.Frame(self.root, padx=10, pady=10)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
@@ -310,6 +315,14 @@ class TrainGUI:
         except Exception as e:
             messagebox.showerror("错误", f"发送失败: {str(e)}")
             self.log(f"发送失败: {str(e)}", "error")
+
+    def check_model_info(self):
+        """发送命令查询ESP端模型信息"""
+        if not self.ser or not self.ser.is_open:
+            messagebox.showerror("错误", "串口未连接，请先连接")
+            return
+        self.log("\n🔍 查询模型信息...", "info")
+        self.send_command_to_sensor("info model")
 
     def update_status(self, text, color="black"):
         self.status_label.config(text=f"状态: {text}", foreground=color)
