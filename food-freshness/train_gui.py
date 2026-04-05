@@ -324,13 +324,23 @@ class TrainGUI:
             if file_size > 128 * 1024:
                 messagebox.showerror("错误", "模型文件太大，最大支持128KB")
                 return
+            # 清空缓冲区，避免旧数据干扰
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
             # 发送命令
             self.ser.write(b"update model\n")
             self.log(f"🔔 已发送 'update model' 命令，开始发送 {os.path.basename(filename)} ({file_size} bytes)...", "info")
-            # 读取并发送文件
+            # 读取并发送文件，分片发送加延时
             with open(filename, 'rb') as f:
                 data = f.read()
-                self.ser.write(data)
+                # 分片发送，避免缓冲区溢出
+                chunk_size = 256
+                for i in range(0, len(data), chunk_size):
+                    chunk = data[i:i+chunk_size]
+                    self.ser.write(chunk)
+                    self.ser.flush()
+                    time.sleep(0.01)  # 短暂延时让ESP处理
+            self.ser.flush()
             self.log(f"✅ 发送完成，总共 {len(data)} bytes", "success")
             self.log("⌛ 等待ESP接收完成，完成后会显示结果，重启ESP加载新模型", "info")
         except Exception as e:
