@@ -151,9 +151,11 @@ void setup() {
       snprintf(filename, sizeof(filename), "/test/sensor_log_%04d%02d%02d_%02d%02d.csv", 
         tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min);
     } else {
-      // 否则用MAC+开机毫秒
+      // 否则用MAC+开机毫秒，去掉MAC中的冒号（冒号不能当文件名）
+      String mac = WiFi.macAddress();
+      mac.replace(":", "");
       snprintf(filename, sizeof(filename), "/test/sensor_log_%s_%lu.csv", 
-        WiFi.macAddress().c_str(), (unsigned long)millis());
+        mac.c_str(), (unsigned long)millis());
     }
     Serial.printf("📝 尝试创建文件: %s\n", filename);
     data_file = SD.open(filename, FILE_WRITE);
