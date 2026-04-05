@@ -17,8 +17,12 @@
 #include <esp_flash.h>
 #include <TensorFlowLite_ESP32.h>
 
-// chirale library puts everything in global namespace
-// no need for tflite namespace
+// Include the actual headers from the library
+#include "all_ops_resolver.h"
+#include "micro_error_reporter.h"
+#include "micro_interpreter.h"
+#include "schema/schema_generated.h"
+#include "version.h"
 
 // 默认模型最大大小 256KB足够我们的CNN模型
 #define MAX_MODEL_SIZE  (256 * 1024)
