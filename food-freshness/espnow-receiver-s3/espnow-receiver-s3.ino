@@ -5,7 +5,8 @@
  * - 实时在串口打印接收的数据（多行人类可读格式）
  * - 支持串口命令转发（set interval, skip warmup, status, update model）
  * - 连接状态检测（带防抖）
- * - 支持SD卡模型OTA升级，第二核心后台处理，ESP-NOW不受影响
+ * - 支持flash自定义分区模型OTA升级，第二核心后台处理，ESP-NOW不受影响
+ * - 接收完成直接生效，无需重启ESP32
  */
 
 #include <esp_now.h>
@@ -53,9 +54,6 @@ const unsigned long CONNECTION_TIMEOUT = 45000;
 const unsigned long STARTUP_GRACE = 120000;
 const int OFFLINE_CONFIRM_COUNT = 2;
 
-// SD卡模型升级配置
-#define SD_CS_PIN 15  // 根据你的硬件修改CS引脚
-
 unsigned long startTime = 0;
 SensorData latestData;
 bool hasValidSensorData = false;
@@ -70,7 +68,7 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// 模型管理
+// 模型管理 - 使用flash自定义分区存储模型
 ModelManager *modelMgr = nullptr;
 
 // ==================== 函数声明 ====================
@@ -91,21 +89,23 @@ void setup() {
   Serial.println("可用命令: set interval <秒>, skip warmup, status, update model, info model");
   startTime = millis();
 
-  // 初始化SD卡模型管理
-  modelMgr = new ModelManager(SD_CS_PIN);
+  // 初始化flash分区模型管理
+  modelMgr = new ModelManager();
   if (!modelMgr->begin()) {
-    Serial.printf("⚠️ SD卡模型管理初始化失败: %s\n", modelMgr->getLastError());
+    Serial.printf("⚠️ 模型分区初始化失败: %s\n", modelMgr->getLastError());
     Serial.println("可以继续使用内置模型，无法OTA升级");
+    Serial.println("请检查 partitions.csv 是否添加了model分区");
   } else {
-    Serial.println("✅ SD卡模型管理初始化完成");
+    Serial.println("✅ 模型分区初始化完成");
     if (modelMgr->hasModel()) {
-      Serial.println("📦 SD卡上找到模型文件，启动后加载");
+      Serial.printf("📦 分区中找到模型文件，大小: %zu bytes (%.1f KB)\n", 
+        modelMgr->getModelSize(), (float)modelMgr->getModelSize() / 1024);
     } else {
-      Serial.println("⚠️ SD卡上没有找到模型，使用内置模型");
+      Serial.println("⚠️ 分区中没有找到模型，使用内置模型");
       Serial.println("发送 'update model' 开始串口升级模型");
     }
     // 启动第二核心处理模型升级，ESP-NOW在Core 0运行互不干扰
-    xTaskCreatePinnedToCore(modelUpgradeTask, "modelUpgrade", 8192, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(modelUpgradeTask, "modelUpgrade", 16384, NULL, 1, NULL, 1);
     Serial.println("✅ 模型升级任务已在Core 1启动，ESP-NOW不受影响");
   }
 
@@ -140,30 +140,31 @@ void modelUpgradeTask(void *arg) {
       String cmd = Serial.readStringUntil('\n');
       cmd.trim();
       if (cmd.equalsIgnoreCase("update model")) {
-        // 开始接收新模型
+        // 开始接收新模型写入flash分区
         if (!modelMgr) {
           Serial.println("❌ 模型管理未初始化");
           continue;
         }
-        bool ok = modelMgr->receiveAndSaveModel(Serial);
+        bool ok = modelMgr->receiveAndWriteModel(Serial);
         if (ok) {
-          Serial.println("✅ 模型接收保存成功！重启后加载新模型");
+          Serial.println("✅ 模型接收成功！已写入flash分区，无需重启直接生效");
         } else {
           Serial.printf("❌ 模型接收失败: %s\n", modelMgr->getLastError());
         }
       } else if (cmd.equalsIgnoreCase("info model")) {
-        // 查询模型信息 - 实时检查SD卡
+        // 查询模型信息 - 实时读取flash分区
         if (!modelMgr) {
           Serial.println("❌ 模型管理未初始化");
         } else {
           Serial.println("\n===== 模型信息 =====");
-          if (modelMgr->hasModel()) {
-            Serial.printf("✅ SD卡有模型文件\n");
+          if (!modelMgr->hasModelPartition()) {
+            Serial.println("❌ 没有找到model分区，请检查partitions.csv");
+          } else if (modelMgr->hasModel()) {
+            Serial.printf("✅ flash分区存有模型\n");
             Serial.printf("📦 模型大小: %zu bytes (%.1f KB)\n", 
               modelMgr->getModelSize(), (float)modelMgr->getModelSize() / 1024);
-            Serial.printf("💾 存储路径: %s\n", modelMgr->getModelPath());
           } else {
-            Serial.println("⚠️ 没有SD卡模型，使用内置模型");
+            Serial.println("⚠️ 分区中没有模型，使用内置模型");
             if (modelMgr->getLastError()[0] != '\0') {
               Serial.printf("💡 错误信息: %s\n", modelMgr->getLastError());
             }
