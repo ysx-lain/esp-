@@ -619,4 +619,13 @@ class TrainGUI:
             f.write("// DO NOT EDIT - generated from training GUI\n\n");
             f.write("#include <stddef.h>\n");
             f.write("#include <stdint.h>\n\n");
-            f.write(f"const unsigned int {array_name}_size
+            f.write(f"const unsigned int {array_name}_size = {len(tflite_model)};\n");
+            f.write(f"const unsigned char {array_name}[] = {{\n  ");
+            bytes_per_line = 16;
+            for i, byte in enumerate(tflite_model):
+                f.write(f"0x{byte:02x}, ");
+                if (i + 1) % bytes_per_line == 0:
+                    f.write("\n  ");
+            if len(tflite_model) % bytes_per_line != 0:
+                f.write("\n");
+            f.write("};\n\n");
