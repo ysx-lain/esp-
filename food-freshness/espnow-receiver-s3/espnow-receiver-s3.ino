@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 简化版：模型存储在SD卡，不需要自定义flash分区，适配chirale库旧API
+ * 适配：chirale/TensorFlowLite_ESP32 2.0 版本
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,12 +18,13 @@
 #include <time.h>
 #include <Arduino.h>
 
-// TensorFlow Lite for Microcontrollers - chirale library correct includes
+// TensorFlowLite_ESP32 2.0 correct includes
 #include <TensorFlowLite_ESP32.h>
-#include <tensorflow/lite/micro/all_ops_resolver.h>
-#include <tensorflow/lite/micro/micro_error_reporter.h>
-#include <tensorflow/lite/micro/micro_interpreter.h>
-#include <tensorflow/lite/schema/schema_generated.h>
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+#include "tensorflow/lite/version.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -93,7 +94,7 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite 全局变量
+// TensorFlow Lite 全局变量 - 2.0 version all in namespace tflite
 tflite::AllOpsResolver resolver;
 tflite::MicroErrorReporter micro_error_reporter;
 const tflite::Model* model;
@@ -500,21 +501,18 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // 旧API: 获取输入张量指针
-  TfLiteTensor* input_tensor = interpreter->input(0);
+  // TFLite 2.0 API: typed_input works correctly now
   for (int i = 0; i < 5; i++) {
-    input_tensor->data.f[i] = input[i];
+    interpreter->typed_input<float>(input[i], &i);
   }
   
   interpreter->Invoke();
   
-  // 获取输出，找到最大概率类别
   int predictedClass = 0;
   float maxProb = 0.0f;
-  TfLiteTensor* output_tensor = interpreter->output(0);
-  // 实际output数组大小就是类别数
-  for (int i = 0; i < numClasses; i++) {
-    float prob = output_tensor->data.f[i];
+  int output_size = interpreter->outputs().size();
+  for (int i = 0; i < output_size; i++) {
+    float prob = interpreter->typed_output<float>(i);
     if (prob > maxProb) {
       maxProb = prob;
       predictedClass = i;
