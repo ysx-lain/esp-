@@ -2,13 +2,15 @@
 """
 智能食材新鲜度检测 - 一体化训练GUI
 功能：
-1. 连接串口实时查看传感器数据
+1. 连接串口实时查看传感器数据，支持断开重连
 2. 点击开始采集数据，自动保存带标签CSV（每个标签单独文件）
 3. 一键训练，自动滑动窗口预处理 → 训练 → 量化 → 导出C头文件
 4. 显示训练曲线和混淆矩阵
 5. 自动同步采集频率到ESP32
 6. 支持定时采集，从第一组数据开始计时，到点自动停止
 7. 移除自动刷新串口，避免爆发式采集问题
+8. 训练完成后直接发送模型文件到ESP32 SD卡升级
+9. 支持指定输出目录保存模型文件
 """
 
 import tkinter as tk
@@ -64,6 +66,7 @@ class TrainGUI:
         self.batch_size = tk.IntVar(value=32)
         self.learning_rate = tk.DoubleVar(value=0.001)
         self.dropout = tk.DoubleVar(value=0.2)
+        self.output_dir = tk.StringVar(value="./")
         self.output_name = tk.StringVar(value="food_freshness")
         self.auto_stop_minutes_var = tk.DoubleVar(value=10)
 
@@ -102,6 +105,8 @@ class TrainGUI:
 
         self.connect_btn = tk.Button(frame, text="连接", command=self.connect_serial, bg="#2196F3", fg="white")
         self.connect_btn.grid(row=2, column=0, columnspan=2, pady=5)
+        self.disconnect_btn = tk.Button(frame, text="断开", command=self.disconnect_serial, bg="#f44336", fg="white", state=tk.DISABLED)
+        self.disconnect_btn.grid(row=2, column=2, pady=5)
 
         # 数据采集
         frame = tk.LabelFrame(left, text="数据采集", padx=5, pady=5)
@@ -156,13 +161,17 @@ class TrainGUI:
         ttk.Label(frame, text="Dropout:").grid(row=5, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Spinbox(frame, from_=0.1, to=0.5, textvariable=self.dropout, width=8, increment=0.05).grid(row=5, column=1, sticky=tk.W)
 
-        ttk.Label(frame, text="输出模型名:").grid(row=6, column=0, padx=5, pady=2, sticky=tk.W)
-        ttk.Entry(frame, textvariable=self.output_name, width=15).grid(row=6, column=1, padx=5, sticky=tk.W)
+        ttk.Label(frame, text="输出目录:").grid(row=6, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Entry(frame, textvariable=self.output_dir, width=12).grid(row=6, column=1, padx=5, sticky=tk.W)
+        tk.Button(frame, text="浏览", command=self.select_output_dir, bg="#2196F3", fg="white").grid(row=6, column=2, pady=2, padx=2)
+
+        ttk.Label(frame, text="输出模型名:").grid(row=7, column=0, padx=5, pady=2, sticky=tk.W)
+        ttk.Entry(frame, textvariable=self.output_name, width=15).grid(row=7, column=1, columnspan=2, padx=5, sticky=tk.W)
 
         self.train_btn = tk.Button(frame, text="开始训练", command=self.start_training, bg="#4CAF50", fg="white")
-        self.train_btn.grid(row=7, column=0, columnspan=2, pady=10)
+        self.train_btn.grid(row=8, column=0, columnspan=2, pady=10)
         self.send_model_btn = tk.Button(frame, text="发送模型到ESP", command=self.select_and_send_model, bg="#FF9800", fg="white")
-        self.send_model_btn.grid(row=7, column=2, pady=10)
+        self.send_model_btn.grid(row=8, column=2, pady=10)
 
         # 右侧面板 - 输出和图表
         right = tk.Frame(self.root, padx=10, pady=10)
@@ -211,6 +220,11 @@ class TrainGUI:
         if d:
             self.data_dir.set(d)
 
+    def select_output_dir(self):
+        d = filedialog.askdirectory()
+        if d:
+            self.output_dir.set(d)
+
     def send_command_to_sensor(self, cmd):
         if not self.ser or not self.ser.is_open:
             self.log(f"串口未打开，无法发送命令: {cmd}", "error")
@@ -246,6 +260,7 @@ class TrainGUI:
         try:
             self.ser = serial.Serial(port, baud, timeout=1)
             self.connect_btn.config(text="已连接", state=tk.DISABLED, bg="#cccccc")
+            self.disconnect_btn.config(state=tk.NORMAL, bg="#f44336")
             self.start_log_btn.config(state=tk.NORMAL)
             self.update_status("已连接", "green")
             self.log(f"成功连接 {port} @ {baud} baud", "success")
@@ -253,6 +268,19 @@ class TrainGUI:
         except Exception as e:
             messagebox.showerror("错误", f"连接失败: {str(e)}")
             self.log(f"连接失败: {str(e)}", "error")
+
+    def disconnect_serial(self):
+        if self.is_logging:
+            self.stop_logging()
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+        self.ser = None
+        self.connect_btn.config(text="连接", state=tk.NORMAL, bg="#2196F3")
+        self.disconnect_btn.config(state=tk.DISABLED, bg="#cccccc")
+        self.start_log_btn.config(state=tk.DISABLED)
+        self.stop_log_btn.config(state=tk.DISABLED)
+        self.update_status("未连接", "gray")
+        self.log("已断开串口连接", "success")
 
     def select_and_send_model(self):
         """选择模型文件，发送到ESP32 SD卡升级"""
@@ -652,9 +680,13 @@ class TrainGUI:
             self.root.after(0, lambda: self.plot_confusion(cm, unique_labels))
 
             # 导出
-            output_base = self.output_name.get()
+            output_base = os.path.join(self.output_dir.get(), self.output_name.get())
             tflite_path = f"{output_base}.tflite"
             header_path = f"{output_base}.h"
+            params_path = f"{output_base}_params.npz"
+
+            # 确保输出目录存在
+            os.makedirs(self.output_dir.get(), exist_ok=True)
 
             self.root.after(0, lambda: self.log(f"\n导出TFLite模型: {tflite_path}", "info"))
             tflite_model = self.convert_to_tflite(model, tflite_path, X_train)
@@ -665,7 +697,7 @@ class TrainGUI:
             self.tflite_to_c_array(list(tflite_model), header_path)
 
             # 保存参数
-            np.savez(f"{output_base}_params.npz", 
+            np.savez(params_path, 
                     mean=scaler.mean_, 
                     std=np.sqrt(scaler.var_),
                     classes=np.array(unique_labels, dtype=object))
@@ -673,7 +705,7 @@ class TrainGUI:
             self.root.after(0, lambda: self.log(f"\n✅ 全部完成！输出文件:", "success"))
             self.root.after(0, lambda: self.log(f"  {tflite_path} - INT8量化模型", "success"))
             self.root.after(0, lambda: self.log(f"  {header_path} - Arduino C头文件，直接include使用", "success"))
-            self.root.after(0, lambda: self.log(f"  {output_base}_params.npz - 参数信息", "success"))
+            self.root.after(0, lambda: self.log(f"  {params_path} - 参数信息", "success"))
 
         except Exception as e:
             self.root.after(0, lambda: self.log(f"训练出错: {str(e)}", "error"))
