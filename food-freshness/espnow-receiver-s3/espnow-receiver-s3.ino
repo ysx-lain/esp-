@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 适配 chirale/TensorFlowLite_ESP32 1.0 版本 (all types in global namespace)
+ * 适配 tanakamasayuki/Arduino_TensorFlowLite_ESP32 版本
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,8 +18,13 @@
 #include <time.h>
 #include <Arduino.h>
 
-// chirale 1.0 - only one include, all types in global namespace
-#include <TensorFlowLite_ESP32.h>
+// tanakamasayuki/Arduino_TensorFlowLite_ESP32 - correct includes
+#include <TensorFlowLite.h>
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+#include "tensorflow/lite/version.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -89,14 +94,14 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite - all types in global namespace (chirale 1.0)
+// TensorFlow Lite - tanakamasayuki version uses tflite namespace
 namespace {
-  MicroErrorReporter micro_error_reporter;
-  AllOpsResolver resolver;
+  tflite::MicroErrorReporter micro_error_reporter;
+  tflite::AllOpsResolver resolver;
 
-  const Model* model;
-  MicroInterpreter* interpreter;
-  uint8_t tensor_arena[TENSOR_ARENA_SIZE] __attribute__((aligned(16)));
+  const tflite::Model* model;
+  tflite::MicroInterpreter* interpreter;
+  alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
 }
 
 bool model_loaded = false;
@@ -257,15 +262,15 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // chirale 1.0 - all types global
-  model = GetModel(model_buffer);
+  // 初始化TFLite
+  model = tflite::GetModel(model_buffer);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.println("❌ Schema version mismatch");
     free(model_buffer);
     return false;
   }
 
-  static MicroInterpreter static_interpreter(
+  static tflite::MicroInterpreter static_interpreter(
     model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
   interpreter = &static_interpreter;
 
@@ -275,11 +280,6 @@ bool loadModelFromSD() {
     free(model_buffer);
     return false;
   }
-
-  // Enable ESP-NN optimizations if available
-  #if defined(ESP_NN_VERSION)
-  esp_nn_enable();
-  #endif
 
   Serial.println("✅ TFLite initialization complete");
   return true;
@@ -507,9 +507,9 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // chirale 1.0 old API
+  // tanakamasayuki version supports typed_input
   for (int i = 0; i < 5; i++) {
-    interpreter->input()->data.f[i] = input[i];
+    interpreter->typed_input<float>(input[i], &i);
   }
   
   interpreter->Invoke();
@@ -518,7 +518,7 @@ int runInference(const SensorData &data) {
   float maxProb = 0.0f;
   int output_size = interpreter->outputs().size();
   for (int i = 0; i < output_size; i++) {
-    float prob = interpreter->output()->data.f[i];
+    float prob = interpreter->typed_output<float>(i);
     if (prob > maxProb) {
       maxProb = prob;
       predictedClass = i;
