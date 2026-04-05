@@ -1,6 +1,6 @@
 /**
  * ESP-NOW 接收端 - 智能食材新鲜度监测系统
- * 适配 chirale/TensorFlowLite_ESP32 1.0 版本
+ * 适配 chirale/TensorFlowLite_ESP32 1.0 版本 (all types in global namespace)
  * 功能：
  * - 接收 ESP-NOW 数据（传感器数据和预热状态）
  * - 实时推理输出预测结果和新鲜度评分
@@ -18,10 +18,8 @@
 #include <time.h>
 #include <Arduino.h>
 
-// 官方写法：只需要这一个头文件 (chirale 1.0/2.0 通用)
+// chirale 1.0 - only one include, all types in global namespace
 #include <TensorFlowLite_ESP32.h>
-
-#include "esp_nn.h"
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -91,13 +89,13 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite - 官方写法
+// TensorFlow Lite - all types in global namespace (chirale 1.0)
 namespace {
-  tflite::MicroErrorReporter micro_error_reporter;
-  tflite::AllOpsResolver resolver;
+  MicroErrorReporter micro_error_reporter;
+  AllOpsResolver resolver;
 
-  const tflite::Model* model;
-  tflite::MicroInterpreter* interpreter;
+  const Model* model;
+  MicroInterpreter* interpreter;
   uint8_t tensor_arena[TENSOR_ARENA_SIZE] __attribute__((aligned(16)));
 }
 
@@ -259,15 +257,15 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // 官方写法
-  model = tflite::GetModel(model_buffer);
+  // chirale 1.0 - all types global
+  model = GetModel(model_buffer);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.println("❌ Schema version mismatch");
     free(model_buffer);
     return false;
   }
 
-  static tflite::MicroInterpreter static_interpreter(
+  static MicroInterpreter static_interpreter(
     model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
   interpreter = &static_interpreter;
 
@@ -278,7 +276,7 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // Enable ESP-NN optimizations (if available)
+  // Enable ESP-NN optimizations if available
   #if defined(ESP_NN_VERSION)
   esp_nn_enable();
   #endif
@@ -509,7 +507,7 @@ int runInference(const SensorData &data) {
   float input[5];
   preprocessInput(data, input);
   
-  // chirale 1.0: use old API - input()->data.f instead of typed_input
+  // chirale 1.0 old API
   for (int i = 0; i < 5; i++) {
     interpreter->input()->data.f[i] = input[i];
   }
