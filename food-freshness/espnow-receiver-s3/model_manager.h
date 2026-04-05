@@ -14,8 +14,8 @@
 #include <esp_partition.h>
 #include <esp_flash.h>
 
-// 默认模型最大大小 128KB足够我们的CNN模型
-#define MAX_MODEL_SIZE  (128 * 1024)
+// 默认模型最大大小 256KB足够我们的CNN模型
+#define MAX_MODEL_SIZE  (256 * 1024)
 
 class ModelManager {
 public:
@@ -31,7 +31,7 @@ public:
     bool begin() {
         // 查找标签为"model"的分区
         // esp_partition_find_first directly returns a pointer to the partition structure
-        const esp_partition_t *found = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_ANY, "model");
+        const esp_partition_t *found = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "model");
         if (found) {
             _partition = found;
         } else {
