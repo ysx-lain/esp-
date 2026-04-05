@@ -18,9 +18,12 @@
 #include <time.h>
 #include <Arduino.h>
 
-// TensorFlow Lite Micro for ESP32 with ESP-NN optimization
+// Chirale TensorFlowLite 2.0
 #include <Chirale_TensorFlowLite.h>
 #include <esp_nn.h>
+
+// All tflite types are under this namespace
+using namespace tflite;
 
 // ==================== 数据结构（与发送端一致） ====================
 #define STATUS_ADS1115_OK 0x01
@@ -90,12 +93,12 @@ struct PeerMonitor {
 PeerMonitor peers[4];
 int peerCount = 0;
 
-// TensorFlow Lite 全局变量 - ESP-NN optimized
-const tflite::Model* model = nullptr;
-tflite::MicroInterpreter* interpreter = nullptr;
+// TensorFlow Lite 全局变量
+const Model* model = nullptr;
+MicroInterpreter* interpreter = nullptr;
 alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
-tflite::AllOpsResolver resolver;
-tflite::MicroErrorReporter micro_error_reporter;
+AllOpsResolver resolver;
+MicroErrorReporter micro_error_reporter;
 bool model_loaded = false;
 
 // 推理结果缓存
@@ -254,16 +257,16 @@ bool loadModelFromSD() {
     return false;
   }
 
-  // 初始化TFLite - 官方写法
-  model = tflite::GetModel(model_buffer);
+  // 初始化TFLite
+  model = GetModel(model_buffer);
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     Serial.println("❌ Schema version mismatch");
     free(model_buffer);
     return false;
   }
 
-  // 静态分配解释器 - ESP-NN optimized
-  static tflite::MicroInterpreter static_interpreter(
+  // 静态分配解释器 - 官方写法
+  static MicroInterpreter static_interpreter(
     model, resolver, tensor_arena, TENSOR_ARENA_SIZE, &micro_error_reporter);
   interpreter = &static_interpreter;
 
